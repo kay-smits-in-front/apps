@@ -7,3 +7,6 @@
 .page:has(.section-label){width:calc(100% - clamp(32px, 5vw, 76px));max-width:none;margin-left:clamp(16px, 2.5vw, 38px);margin-right:auto;padding-top:58px}
 .section-label{margin-bottom:20px}
 @media(max-width:520px){.page:has(.section-label){width:calc(100% - 32px);margin-left:16px;padding-top:36px}}
+
+/* Hide the invisible anti-bot honeypot from normal visitors. */
+.bot-trap{position:absolute!important;left:-10000px!important;top:auto!important;width:1px!important;height:1px!important;overflow:hidden!important}
