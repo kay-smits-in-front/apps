@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Gebruikersbeheer · kay.apps{% endblock %}
+{% block content %}
+<section class="dashboard-head"><div><div class="eyebrow">BEHEER</div><h1>Gebruikers</h1><p class="muted">Alleen de aangewezen beheerder kan toegang beheren.</p></div></section>
+<div class="user-list">
+  {% for user in users %}
+  <article class="user-row"><div class="user-avatar">{{ user.email[0]|upper }}</div><div class="user-info"><strong>{{ user.email }}</strong><span>Aangevraagd: {{ user.created_at.strftime('%d-%m-%Y %H:%M') }} UTC</span></div><span class="user-state {{ 'approved' if user.approved else 'pending' }}">{{ 'Goedgekeurd' if user.approved else 'In afwachting' }}</span>
+  {% if not user.is_admin %}
+  <form method="post" action="{{ url_for('approve_user' if not user.approved else 'revoke_user', user_id=user.id) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button class="small-button" type="submit">{{ 'Goedkeuren' if not user.approved else 'Toegang intrekken' }}</button>
+  </form>
+  {% endif %}</article>
+  {% else %}<p class="muted">Nog geen accounts.</p>{% endfor %}
+</div>
+{% endblock %}
