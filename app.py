@@ -24,7 +24,7 @@ from wtforms.validators import DataRequired, Email, Length
 load_dotenv()
 APP_ENV = os.getenv("APP_ENV", "development").strip().lower()
 IS_PRODUCTION = APP_ENV == "production"
-ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "kaysmits@icloud.com").strip().lower()
+ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "admin@example.com").strip().lower()
 SECRET_KEY = os.getenv("SECRET_KEY", "")
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///apps.db")
 TRUSTED_HOSTS = [h.strip() for h in os.getenv("TRUSTED_HOSTS", "localhost,127.0.0.1").split(",") if h.strip()]
@@ -40,6 +40,8 @@ if IS_PRODUCTION:
         missing.append("DATABASE_URL (PostgreSQL)")
     if not os.getenv("TRUSTED_HOSTS", "").strip():
         missing.append("TRUSTED_HOSTS (domeinnamen)")
+    if not ADMIN_EMAIL or ADMIN_EMAIL == "admin@example.com":
+        missing.append("ADMIN_EMAIL (beheerderse-mailadres)")
     if not RATELIMIT_STORAGE_URI.startswith(("redis://", "rediss://")):
         missing.append("RATELIMIT_STORAGE_URI (Redis)")
     if not TURNSTILE_SITE_KEY or not TURNSTILE_SECRET_KEY:
