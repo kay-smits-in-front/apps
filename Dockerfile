@@ -6,4 +6,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 RUN useradd --create-home --uid 10001 appuser && chown -R appuser:appuser /app
 USER appuser
-CMD ["sh", "-c", "gunicorn --workers 2 --threads 4 --timeout 30 --bind 0.0.0.0:\u0024{PORT:-8000} wsgi:app"]
+CMD ["sh", "-c", "PORT=${PORT:-8000}; exec gunicorn --workers 2 --threads 4 --timeout 30 --bind 0.0.0.0:$PORT wsgi:app"]
