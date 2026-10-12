@@ -8,13 +8,23 @@
     <p class="muted">Aanvragen blijven geblokkeerd totdat de beheerder ze goedkeurt.</p>
     <form method="post" class="form">
       {{ form.hidden_tag() }}
+      <div class="bot-trap" aria-hidden="true">
+        <label for="website">Laat dit veld leeg</label>
+        <input id="website" name="website" type="text" tabindex="-1" autocomplete="off">
+      </div>
       {{ form.email.label }}{{ form.email(placeholder="jij@voorbeeld.nl", autocomplete="email") }}
       {% for error in form.email.errors %}<small class="field-error">{{ error }}</small>{% endfor %}
       {{ form.password.label }}{{ form.password(placeholder="Gebruik een uniek wachtwoord", autocomplete="new-password") }}
       {% for error in form.password.errors %}<small class="field-error">{{ error }}</small>{% endfor %}
+      {% if turnstile_site_key %}
+      <div class="cf-turnstile" data-sitekey="{{ turnstile_site_key }}" data-theme="dark"></div>
+      <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
+      {% elif config.get('APP_ENV') == 'production' %}
+      <p class="muted">Aanvragen zijn tijdelijk niet beschikbaar.</p>
+      {% endif %}
       {{ form.submit(class_="primary-button") }}
     </form>
-    <p class="tiny muted">Dit is een eerste basisversie. E-mailverificatie en anti-botmaatregelen moeten worden toegevoegd voordat registratie publiek wordt geopend.</p>
+    <p class="tiny muted">Toegang wordt pas verleend nadat de beheerder de aanvraag heeft goedgekeurd.</p>
   </div>
 </section>
 {% endblock %}
