@@ -1,10 +1,6 @@
 {% extends "base.html" %}
 {% block title %}Dashboard · kay.apps{% endblock %}
 {% block content %}
-<section class="dashboard-head">
-  <div><div class="eyebrow"><span class="pulse"></span> YOUR WORKSPACE</div><h1>Goed om je te zien.</h1><p class="muted">Jouw tools, overzichtelijk bij elkaar.</p></div>
-  <div class="date-pill"><span class="date-dot"></span> Persoonlijke omgeving</div>
-</section>
 <div class="section-label"><span>JOUW APPS</span><span class="section-count">01 / IN OPBOUW</span></div>
 <section class="app-grid">
   {% for item in apps %}
@@ -16,5 +12,4 @@
   {% endfor %}
   <article class="app-card add-card"><div class="add-symbol">+</div><h2>Meer volgt</h2><p>Nieuwe persoonlijke apps verschijnen hier zodra je ze toevoegt.</p><div class="app-card-bottom"><span class="app-type">YOUR NEXT IDEA</span><span class="arrow">✳</span></div></article>
 </section>
-<div class="dashboard-note"><span class="note-icon">✦</span><div><strong>Jouw plek om slimmer te werken.</strong><p>Dit dashboard is de centrale ingang. De apps zelf kunnen apart blijven draaien en later veilig worden gekoppeld.</p></div></div>
 {% endblock %}
