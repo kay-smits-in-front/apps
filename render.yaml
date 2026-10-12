@@ -14,7 +14,7 @@ services:
       - key: FLASK_DEBUG
         value: "0"
       - key: ADMIN_EMAIL
-        value: kaysmits@icloud.com
+        sync: false
       - key: SECRET_KEY
         generateValue: true
       - key: DATABASE_URL
