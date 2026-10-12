@@ -38,7 +38,7 @@ if IS_PRODUCTION:
         missing.append("SECRET_KEY (minimaal 32 willekeurige tekens)")
     if not DATABASE_URL.startswith(("postgresql://", "postgres://")):
         missing.append("DATABASE_URL (PostgreSQL)")
-    if not TRUSTED_HOSTS:
+    if not os.getenv("TRUSTED_HOSTS", "").strip():
         missing.append("TRUSTED_HOSTS (domeinnamen)")
     if not RATELIMIT_STORAGE_URI.startswith(("redis://", "rediss://")):
         missing.append("RATELIMIT_STORAGE_URI (Redis)")
@@ -53,6 +53,7 @@ if DATABASE_URL.startswith("postgres://"):
 app = Flask(__name__, instance_relative_config=True)
 os.makedirs(app.instance_path, exist_ok=True)
 app.config.update(
+    APP_ENV=APP_ENV,
     SECRET_KEY=SECRET_KEY or "local-development-only-change-me",
     SQLALCHEMY_DATABASE_URI=DATABASE_URL,
     SQLALCHEMY_TRACK_MODIFICATIONS=False,
