@@ -34,16 +34,6 @@ services:
         sync: false
       - key: TRUSTED_PROXY_HOPS
         value: "1"
-      - key: MAIL_SERVER
-        sync: false
-      - key: MAIL_PORT
-        value: "587"
-      - key: MAIL_USERNAME
-        sync: false
-      - key: MAIL_PASSWORD
-        sync: false
-      - key: MAIL_FROM
-        sync: false
 
   - type: keyvalue
     name: kay-apps-rate-limits
