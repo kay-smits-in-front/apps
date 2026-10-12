@@ -1,6 +1,7 @@
 import os
 from datetime import datetime, timezone
 from functools import wraps
+from getpass import getpass
 
 from dotenv import load_dotenv
 from flask import Flask, flash, redirect, render_template, request, url_for
@@ -13,11 +14,11 @@ from flask_login import (
     logout_user,
 )
 from flask_sqlalchemy import SQLAlchemy
-from flask_wtf import FlaskForm
+from flask_wtf import FlaskForm, CSRFProtect
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from werkzeug.security import check_password_hash, generate_password_hash
-from wtforms import EmailField, PasswordField, StringField, SubmitField
+from wtforms import EmailField, PasswordField, SubmitField
 from wtforms.validators import DataRequired, Email, Length
 
 load_dotenv()
@@ -31,6 +32,7 @@ app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["SESSION_COOKIE_SECURE"] = os.getenv("FLASK_DEBUG", "0") != "1"
 
 db = SQLAlchemy(app)
+csrf = CSRFProtect(app)
 login_manager = LoginManager(app)
 login_manager.login_view = "login"
 login_manager.login_message = "Log eerst in om deze pagina te bekijken."
@@ -197,11 +199,31 @@ def logout():
     return redirect(url_for("login"))
 
 
+@app.cli.command("create-admin")
+def create_admin():
+    """Interactively create or promote the configured administrator account."""
+    email = ADMIN_EMAIL
+    password = getpass(f"Nieuw wachtwoord voor beheerder {email} (minimaal 12 tekens): ")
+    confirmation = getpass("Herhaal wachtwoord: ")
+    if len(password) < 12 or password != confirmation:
+        print("Wachtwoorden komen niet overeen of zijn korter dan 12 tekens.")
+        return
+    with app.app_context():
+        db.create_all()
+        user = db.session.scalar(select(User).where(User.email == email))
+        if user is None:
+            user = User(email=email, password_hash=generate_password_hash(password))
+            db.session.add(user)
+        user.password_hash = generate_password_hash(password)
+        user.approved = True
+        user.is_admin = True
+        db.session.commit()
+        print(f"Beheerdersaccount ingesteld voor {email}.")
+
+
 def initialise_database():
     with app.app_context():
         db.create_all()
-        # Intentionally do not auto-create an admin from a public signup form.
-        # Bootstrap the admin account manually using the documented CLI step.
 
 
 if __name__ == "__main__":
