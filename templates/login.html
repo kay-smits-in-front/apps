@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Inloggen · kay.apps{% endblock %}
+{% block content %}
+<section class="auth-layout">
+  <div class="intro">
+    <div class="eyebrow"><span class="pulse"></span> YOUR PERSONAL WORKSPACE</div>
+    <h1>Alles wat je bouwt.<br><span>Één plek.</span></h1>
+    <p>Een rustige, persoonlijke startplek voor je apps, ideeën en slimme tools.</p>
+    <div class="feature-line"><span>✦</span> Gemaakt voor jouw workflow</div>
+    <div class="feature-line"><span>⌁</span> Beschikbaar op elk scherm</div>
+  </div>
+  <div class="auth-card">
+    <div class="card-icon">↗</div>
+    <h2>Welkom terug</h2><p class="muted">Log in op je persoonlijke omgeving.</p>
+    <form method="post" class="form">
+      {{ form.hidden_tag() }}
+      {{ form.email.label }}{{ form.email(placeholder="jij@voorbeeld.nl", autocomplete="email") }}
+      {% for error in form.email.errors %}<small class="field-error">{{ error }}</small>{% endfor %}
+      {{ form.password.label }}{{ form.password(placeholder="Minimaal 12 tekens", autocomplete="current-password") }}
+      {% for error in form.password.errors %}<small class="field-error">{{ error }}</small>{% endfor %}
+      {{ form.submit(class_="primary-button") }}
+    </form>
+    <div class="auth-bottom">Nog geen toegang? <a href="{{ url_for('request_access') }}">Vraag toegang aan</a></div>
+    <div class="secure-note"><span>▣</span> Alleen goedgekeurde accounts krijgen toegang</div>
+  </div>
+</section>
+{% endblock %}
