@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="nl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#10131b">
+  <title>{% block title %}Apps by Kay{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+  <div class="ambient ambient-one"></div><div class="ambient ambient-two"></div>
+  <header class="topbar">
+    <a class="brand" href="{{ url_for('index') }}"><span class="brand-mark">K</span><span>kay<span class="brand-muted">.apps</span></span></a>
+    {% if current_user.is_authenticated %}
+      <nav class="topnav">
+        {% if current_user.is_admin %}<a href="{{ url_for('admin_users') }}">Gebruikers</a>{% endif %}
+        <span class="user-chip">{{ current_user.email }}</span>
+        <form action="{{ url_for('logout') }}" method="post" class="inline-form">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <button class="text-button" type="submit">Uitloggen</button>
+        </form>
+      </nav>
+    {% endif %}
+  </header>
+  <main class="page">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}<div class="flash-stack">{% for category, message in messages %}<div class="flash {{ category }}">{{ message }}</div>{% endfor %}</div>{% endif %}
+    {% endwith %}
+    {% block content %}{% endblock %}
+  </main>
+  <footer class="footer">Persoonlijke tools, op één plek. <span>Privé by design.</span></footer>
+</body>
+</html>
