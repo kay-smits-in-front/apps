@@ -41,3 +41,27 @@ def test_health_endpoint_is_available(client):
     response = client.get("/healthz")
     assert response.status_code == 200
     assert response.json == {"status": "ok"}
+
+
+
+def test_public_pages_do_not_expose_admin_email_or_password_hash(client):
+    for path in ("/login", "/request-access"):
+        response = client.get(path)
+        assert response.status_code == 200
+        assert b"kaysmits@icloud.com" not in response.data
+        assert b"password_hash" not in response.data
+        assert b"SECRET_KEY" not in response.data
+
+
+def test_signup_password_hash_is_not_in_response(client):
+    response = client.post(
+        "/request-access",
+        data={
+            "email": "privacy-test@example.com",
+            "password": "a-unique-test-password-123",
+        },
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+    assert b"password_hash" not in response.data
+    assert b"a-unique-test-password-123" not in response.data
