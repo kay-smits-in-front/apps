@@ -10,7 +10,7 @@
 <body>
   <div class="ambient ambient-one"></div><div class="ambient ambient-two"></div>
   <header class="topbar">
-    <a class="brand" href="{{ url_for('index') }}"><span class="brand-mark">K</span><span>kay<span class="brand-muted">.apps</span></span></a>
+    <a class="brand" href="{{ url_for('index') }}"><span>kay<span class="brand-muted">.apps</span></span></a>
     {% if current_user.is_authenticated %}
       <nav class="topnav">
         {% if current_user.is_admin %}<a href="{{ url_for('admin_users') }}">Gebruikers</a>{% endif %}
