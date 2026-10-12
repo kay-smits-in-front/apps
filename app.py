@@ -1,43 +1,82 @@
 import os
+import smtplib
+import urllib.parse
+import urllib.request
 from datetime import datetime, timezone
+from email.message import EmailMessage
 from functools import wraps
 from getpass import getpass
 
 from dotenv import load_dotenv
-from flask import Flask, flash, redirect, render_template, request, url_for
-from flask_login import (
-    LoginManager,
-    UserMixin,
-    current_user,
-    login_required,
-    login_user,
-    logout_user,
-)
+from flask import Flask, abort, flash, redirect, render_template, request, url_for
+from flask_login import LoginManager, UserMixin, current_user, login_required, login_user, logout_user
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 from flask_sqlalchemy import SQLAlchemy
-from flask_wtf import FlaskForm, CSRFProtect
+from flask_wtf import CSRFProtect, FlaskForm
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
+from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import check_password_hash, generate_password_hash
 from wtforms import EmailField, PasswordField, SubmitField
 from wtforms.validators import DataRequired, Email, Length
 
 load_dotenv()
+APP_ENV = os.getenv("APP_ENV", "development").strip().lower()
+IS_PRODUCTION = APP_ENV == "production"
+ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "kaysmits@icloud.com").strip().lower()
+SECRET_KEY = os.getenv("SECRET_KEY", "")
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///apps.db")
+TRUSTED_HOSTS = [h.strip() for h in os.getenv("TRUSTED_HOSTS", "localhost,127.0.0.1").split(",") if h.strip()]
+TURNSTILE_SITE_KEY = os.getenv("TURNSTILE_SITE_KEY", "").strip()
+TURNSTILE_SECRET_KEY = os.getenv("TURNSTILE_SECRET_KEY", "").strip()
+RATELIMIT_STORAGE_URI = os.getenv("RATELIMIT_STORAGE_URI", "memory://").strip()
+
+if IS_PRODUCTION:
+    missing = []
+    if len(SECRET_KEY) < 32 or SECRET_KEY == "local-development-only-change-me":
+        missing.append("SECRET_KEY (minimaal 32 willekeurige tekens)")
+    if not DATABASE_URL.startswith(("postgresql://", "postgres://")):
+        missing.append("DATABASE_URL (PostgreSQL)")
+    if not TRUSTED_HOSTS:
+        missing.append("TRUSTED_HOSTS (domeinnamen)")
+    if not RATELIMIT_STORAGE_URI.startswith(("redis://", "rediss://")):
+        missing.append("RATELIMIT_STORAGE_URI (Redis)")
+    if not TURNSTILE_SITE_KEY or not TURNSTILE_SECRET_KEY:
+        missing.append("TURNSTILE_SITE_KEY en TURNSTILE_SECRET_KEY")
+    if missing:
+        raise RuntimeError("Onvolledige productieconfiguratie: " + ", ".join(missing))
+
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
 app = Flask(__name__, instance_relative_config=True)
 os.makedirs(app.instance_path, exist_ok=True)
-app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "local-development-only-change-me")
-app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv("DATABASE_URL", "sqlite:///apps.db")
-app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
-app.config["SESSION_COOKIE_HTTPONLY"] = True
-app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
-app.config["SESSION_COOKIE_SECURE"] = os.getenv("FLASK_DEBUG", "0") != "1"
+app.config.update(
+    SECRET_KEY=SECRET_KEY or "local-development-only-change-me",
+    SQLALCHEMY_DATABASE_URI=DATABASE_URL,
+    SQLALCHEMY_TRACK_MODIFICATIONS=False,
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=IS_PRODUCTION,
+    REMEMBER_COOKIE_HTTPONLY=True,
+    REMEMBER_COOKIE_SAMESITE="Lax",
+    REMEMBER_COOKIE_SECURE=IS_PRODUCTION,
+    MAX_CONTENT_LENGTH=1024 * 1024,
+    TRUSTED_HOSTS=TRUSTED_HOSTS,
+    WTF_CSRF_TIME_LIMIT=3600,
+)
+proxy_hops = int(os.getenv("TRUSTED_PROXY_HOPS", "0"))
+if proxy_hops > 0:
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=proxy_hops, x_proto=proxy_hops, x_host=proxy_hops)
 
 db = SQLAlchemy(app)
 csrf = CSRFProtect(app)
+limiter = Limiter(get_remote_address, app=app, storage_uri=RATELIMIT_STORAGE_URI,
+                  default_limits=["200 per hour"], headers_enabled=False)
 login_manager = LoginManager(app)
 login_manager.login_view = "login"
 login_manager.login_message = "Log eerst in om deze pagina te bekijken."
-ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "kaysmits@icloud.com").strip().lower()
 
 
 class User(UserMixin, db.Model):
@@ -63,18 +102,72 @@ class SignupForm(FlaskForm):
 
 @login_manager.user_loader
 def load_user(user_id):
-    return db.session.get(User, int(user_id))
+    try:
+        return db.session.get(User, int(user_id))
+    except (TypeError, ValueError):
+        return None
 
 
 def admin_required(view):
     @wraps(view)
     @login_required
     def wrapped(*args, **kwargs):
-        if not current_user.is_admin or current_user.email.lower() != ADMIN_EMAIL:
-            flash("Deze pagina is alleen beschikbaar voor de beheerder.", "error")
-            return redirect(url_for("dashboard"))
+        if not current_user.is_admin or current_user.email.lower() != ADMIN_EMAIL or not current_user.approved:
+            abort(403)
         return view(*args, **kwargs)
     return wrapped
+
+
+def verify_turnstile(token):
+    if not TURNSTILE_SECRET_KEY or not TURNSTILE_SITE_KEY or not token:
+        return False
+    payload = urllib.parse.urlencode({
+        "secret": TURNSTILE_SECRET_KEY,
+        "response": token,
+        "remoteip": request.remote_addr or "",
+    }).encode()
+    req = urllib.request.Request(
+        "https://challenges.cloudflare.com/turnstile/v0/siteverify",
+        data=payload,
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        method="POST",
+    )
+    try:
+        import json
+        with urllib.request.urlopen(req, timeout=5) as response:
+            result = json.loads(response.read(8192).decode("utf-8"))
+        return result.get("success") is True
+    except Exception:
+        app.logger.warning("Turnstile-verificatie niet beschikbaar.")
+        return False
+
+
+def send_admin_notification(email):
+    host = os.getenv("MAIL_SERVER", "").strip()
+    username = os.getenv("MAIL_USERNAME", "").strip()
+    password = os.getenv("MAIL_PASSWORD", "")
+    if not host or not username or not password:
+        app.logger.warning("SMTP niet geconfigureerd; aanvraag staat klaar in Gebruikersbeheer.")
+        return False
+    message = EmailMessage()
+    message["Subject"] = "Nieuwe toegangaanvraag voor kay.apps"
+    message["From"] = os.getenv("MAIL_FROM", username)
+    message["To"] = ADMIN_EMAIL
+    message.set_content(
+        "Er is een nieuwe toegangaanvraag voor kay.apps.\n\n"
+        f"E-mailadres aanvrager: {email}\n\n"
+        "Log in op het portaal en beoordeel de aanvraag via Gebruikersbeheer. "
+        "Er is geen wachtwoord in deze melding opgenomen."
+    )
+    try:
+        with smtplib.SMTP(host, int(os.getenv("MAIL_PORT", "587")), timeout=10) as server:
+            server.starttls()
+            server.login(username, password)
+            server.send_message(message)
+        return True
+    except Exception:
+        app.logger.exception("E-mailmelding voor toegangaanvraag kon niet worden verzonden.")
+        return False
 
 
 @app.after_request
@@ -83,17 +176,32 @@ def add_security_headers(response):
     response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
     response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+    response.headers.setdefault("Cache-Control", "no-store")
+    response.headers.setdefault(
+        "Content-Security-Policy",
+        "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; "
+        "form-action 'self'; img-src 'self' data:; style-src 'self'; "
+        "script-src 'self' https://challenges.cloudflare.com; "
+        "frame-src https://challenges.cloudflare.com; connect-src 'self' https://challenges.cloudflare.com",
+    )
+    if IS_PRODUCTION:
+        response.headers.setdefault("Strict-Transport-Security", "max-age=31536000")
     return response
 
 
 @app.route("/")
 def index():
-    if current_user.is_authenticated:
-        return redirect(url_for("dashboard"))
-    return redirect(url_for("login"))
+    return redirect(url_for("dashboard" if current_user.is_authenticated else "login"))
+
+
+@app.route("/healthz")
+@limiter.exempt
+def healthz():
+    return {"status": "ok"}, 200
 
 
 @app.route("/login", methods=["GET", "POST"])
+@limiter.limit("5 per minute; 20 per hour", methods=["POST"])
 def login():
     if current_user.is_authenticated:
         return redirect(url_for("dashboard"))
@@ -105,7 +213,7 @@ def login():
             if not user.approved:
                 flash("Je account is nog niet goedgekeurd.", "error")
             else:
-                login_user(user)
+                login_user(user, remember=False, fresh=True)
                 return redirect(url_for("dashboard"))
         else:
             flash("Inloggen mislukt. Controleer je gegevens.", "error")
@@ -113,31 +221,36 @@ def login():
 
 
 @app.route("/request-access", methods=["GET", "POST"])
+@limiter.limit("3 per hour; 8 per day", methods=["POST"])
 def request_access():
     if current_user.is_authenticated:
         return redirect(url_for("dashboard"))
     form = SignupForm()
+    if IS_PRODUCTION and (not TURNSTILE_SITE_KEY or not TURNSTILE_SECRET_KEY):
+        abort(503, description="Toegang aanvragen is tijdelijk niet beschikbaar.")
     if form.validate_on_submit():
+        if request.form.get("website", "").strip():
+            abort(400)
+        if TURNSTILE_SITE_KEY and not verify_turnstile(request.form.get("cf-turnstile-response", "")):
+            flash("Controle mislukt. Probeer het opnieuw.", "error")
+            return render_template("request_access.html", form=form, turnstile_site_key=TURNSTILE_SITE_KEY), 400
         email = form.email.data.strip().lower()
         existing = db.session.scalar(select(User).where(User.email == email))
         if existing:
-            flash("Deze aanvraag kan niet worden verwerkt. Neem contact op met de beheerder.", "error")
+            flash("Als deze aanvraag verwerkt kan worden, ontvang je verdere informatie.", "success")
+            return redirect(url_for("login"))
+        user = User(email=email, password_hash=generate_password_hash(form.password.data),
+                    approved=False, is_admin=False)
+        db.session.add(user)
+        try:
+            db.session.commit()
+        except IntegrityError:
+            db.session.rollback()
         else:
-            user = User(
-                email=email,
-                password_hash=generate_password_hash(form.password.data),
-                approved=False,
-                is_admin=False,
-            )
-            db.session.add(user)
-            try:
-                db.session.commit()
-                flash("Aanvraag ontvangen. Je krijgt pas toegang na goedkeuring door de beheerder.", "success")
-                return redirect(url_for("login"))
-            except IntegrityError:
-                db.session.rollback()
-                flash("Deze aanvraag kan niet worden verwerkt.", "error")
-    return render_template("request_access.html", form=form)
+            send_admin_notification(email)
+        flash("Aanvraag ontvangen. Je krijgt pas toegang na goedkeuring door de beheerder.", "success")
+        return redirect(url_for("login"))
+    return render_template("request_access.html", form=form, turnstile_site_key=TURNSTILE_SITE_KEY)
 
 
 @app.route("/dashboard")
@@ -147,15 +260,8 @@ def dashboard():
         logout_user()
         flash("Je account heeft nog geen toegang.", "error")
         return redirect(url_for("login"))
-    apps = [
-        {
-            "name": "Three Way",
-            "description": "Beleggingsanalyse en portefeuille-inzichten.",
-            "status": "Koppeling volgt",
-            "icon": "↗",
-            "url": None,
-        }
-    ]
+    apps = [{"name": "Three Way", "description": "Beleggingsanalyse en portefeuille-inzichten.",
+             "status": "Koppeling volgt", "icon": "↗", "url": None}]
     return render_template("dashboard.html", apps=apps)
 
 
@@ -171,11 +277,10 @@ def admin_users():
 def approve_user(user_id):
     user = db.session.get_or_404(User, user_id)
     if user.email.lower() == ADMIN_EMAIL:
-        flash("Het beheerdersaccount wordt niet via deze pagina aangepast.", "error")
-    else:
-        user.approved = True
-        db.session.commit()
-        flash(f"Toegang goedgekeurd voor {user.email}.", "success")
+        abort(403)
+    user.approved = True
+    db.session.commit()
+    flash(f"Toegang goedgekeurd voor {user.email}.", "success")
     return redirect(url_for("admin_users"))
 
 
@@ -184,11 +289,10 @@ def approve_user(user_id):
 def revoke_user(user_id):
     user = db.session.get_or_404(User, user_id)
     if user.email.lower() == ADMIN_EMAIL:
-        flash("Beheerdersrechten kunnen hier niet worden ingetrokken.", "error")
-    else:
-        user.approved = False
-        db.session.commit()
-        flash(f"Toegang ingetrokken voor {user.email}.", "success")
+        abort(403)
+    user.approved = False
+    db.session.commit()
+    flash(f"Toegang ingetrokken voor {user.email}.", "success")
     return redirect(url_for("admin_users"))
 
 
@@ -202,7 +306,6 @@ def logout():
 
 @app.cli.command("create-admin")
 def create_admin():
-    """Interactively create or promote the configured administrator account."""
     email = ADMIN_EMAIL
     password = getpass(f"Nieuw wachtwoord voor beheerder {email} (minimaal 12 tekens): ")
     confirmation = getpass("Herhaal wachtwoord: ")
