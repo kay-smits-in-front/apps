@@ -1,8 +1,10 @@
 # kay.apps — persoonlijk app-portaal
 
-Deze repository bevat uitsluitend het portaal. Three Way blijft in zijn eigen repository en wordt later veilig gekoppeld.
+Deze repository bevat uitsluitend het portaal. Three Way blijft in zijn eigen repository en wordt later apart gekoppeld.
 
 ## Lokaal starten (Windows / PyCharm)
+
+Gebruik Python 3.13:
 
     py -3.13 -m venv .venv
     .\.venv\Scripts\Activate.ps1
@@ -10,54 +12,62 @@ Deze repository bevat uitsluitend het portaal. Three Way blijft in zijn eigen re
     Copy-Item .env.example .env
     python app.py
 
-Maak een beheerder aan. Het wachtwoord wordt interactief gevraagd en staat niet in code:
+Maak lokaal een beheerder aan. Je voert het wachtwoord interactief in; het komt niet in de code of shell-geschiedenis:
 
     flask --app app create-admin
 
-## Productieconfiguratie
+De ontwikkelserver is alleen voor lokaal gebruik. Gebruik nooit `FLASK_DEBUG=1` op een publiek toegankelijke server.
 
-De app weigert op te starten als verplichte productie-instellingen ontbreken. Stel deze in als environment variables bij de hostingprovider, niet in HTML/CSS/JavaScript, niet in Git en niet in een URL:
+## Tests uitvoeren
 
-- APP_ENV=production
-- FLASK_DEBUG=0
-- SECRET_KEY: minimaal 32 willekeurige tekens, uniek voor productie
-- ADMIN_EMAIL=kaysmits@icloud.com
-- DATABASE_URL: PostgreSQL-connection string van de hostingprovider
-- TRUSTED_HOSTS: exacte domeinen, kommagescheiden, bijvoorbeeld apps.jouwdomein.nl
-- RATELIMIT_STORAGE_URI: Redis-URL (redis:// of rediss://) voor gedeelde rate limits
-- TURNSTILE_SITE_KEY en TURNSTILE_SECRET_KEY: Cloudflare Turnstile keys; server-side verificatie is verplicht voor openbare accountaanvragen
-- TRUSTED_PROXY_HOPS: alleen instellen op het exacte aantal vertrouwde reverse proxies als de hostingprovider dat vereist
+    python -m pytest -q
 
-Optioneel voor e-mailmeldingen:
-- MAIL_SERVER, MAIL_PORT, MAIL_USERNAME, MAIL_PASSWORD, MAIL_FROM
+## Render: productie-infrastructuur
 
-SMTP ontbreekt? Dan wordt de aanvraag nog opgeslagen en zichtbaar onder Gebruikersbeheer, maar komt er geen e-mailmelding. Configureer SMTP voordat je op e-mailmeldingen vertrouwt.
+De root van deze repository bevat `render.yaml`, een Render Blueprint voor:
+- webservice via de meegeleverde Dockerfile en Gunicorn
+- PostgreSQL voor accounts
+- private Redis/Key Value voor gedeelde rate limits
+- regio Frankfurt
+- verplichte geheime instellingen die je in Render zelf invult
 
-## Server en domein
+### Eerste Render setup
 
-De applicatie draait in productie via Gunicorn, niet via Flask' development server. Gebruik de meegeleverde Dockerfile of start met:
+1. Push de branch met de Render-configuratie naar GitHub.
+2. Open Render en kies **New → Blueprint**; selecteer deze repository en de branch die je wilt testen.
+3. Controleer de resources en eventuele kosten voordat je bevestigt. De webservice, database en Key Value hebben elk hun eigen plan/kosten; verander geen plan zonder de gevolgen voor beschikbaarheid en dataretentie te controleren.
+4. Vul de gevraagde Turnstile-waarden in. Maak de site key en secret key aan in Cloudflare Turnstile; de secret key hoort uitsluitend bij Render als environment variable.
+5. Vul `TRUSTED_HOSTS` in met de Render-hostnaam die Render voor de webservice heeft toegekend. Gebruik alleen hostnamen, zonder `https://`, paden of poorten.
+6. Configureer SMTP-waarden als je e-mailnotificaties wilt. Zonder SMTP blijven aanvragen zichtbaar in Gebruikersbeheer, maar wordt er geen e-mail verzonden.
+7. Deploy eerst als testomgeving. Controleer `/healthz`, inloggen, aanvragen, botcontrole en goedkeuring.
 
-    gunicorn --workers 2 --threads 4 --timeout 30 --bind 0.0.0.0:$PORT wsgi:app
+### Beheerder aanmaken op Render
 
-Gebruik een hostingprovider met persistente PostgreSQL, Redis, environment variables en automatische HTTPS.
+De lokale SQLite-database en Render PostgreSQL zijn verschillende databases. Een lokaal aangemaakte admin wordt dus niet automatisch naar Render gekopieerd.
 
-Een domeinnaam plak je niet in Python. Voeg de domeinnaam toe in het dashboard van je hostingprovider. De host toont daarna de DNS-instructies; voeg die bij TransIP toe als A/AAAA- of CNAME-record zoals de host voorschrijft. Voeg vervolgens exact die hostnaam toe aan TRUSTED_HOSTS. Wacht op DNS-propagatie en controleer HTTPS voordat je privégegevens gebruikt.
+Nadat Render PostgreSQL is aangemaakt, voer je in de shell van de webservice eenmalig uit:
 
-## Beveiliging in deze basis
+    flask --app app create-admin
 
-- CSRF-bescherming op formulieren
-- Rate limits op inloggen en aanvragen, met Redis in productie
-- Cloudflare Turnstile server-side verificatie en honeypot tegen bots
-- Wachtwoorden alleen als hash opgeslagen
-- Admin-routes vereisen een ingelogde, goedgekeurde beheerder met het ingestelde admin-e-mailadres
-- Beveiligde sessiecookies, CSP en security response headers
-- Productie start niet zonder expliciete secret-, PostgreSQL-, Redis- en Turnstile-configuratie
-- Geen wachtwoorden of geheime sleutels in frontend-output of repository
+Gebruik een sterk, uniek wachtwoord dat niet eerder in chat of in code is gedeeld. De opdracht vraagt het wachtwoord interactief en slaat alleen een hash op. Als de gekozen Render-service geen shell aanbiedt, gebruik dan een eenmalige beveiligde job/command om dezelfde CLI-opdracht uit te voeren; zet het wachtwoord nooit als vaste startopdracht of in `render.yaml`.
 
-## Voor livegang verplicht
+### Domein later koppelen
 
-Dit is een geharde basis, geen garantie op absolute veiligheid. Stel alle secrets in bij de host, configureer HTTPS/DNS, maak versleutelde back-ups en test herstel, voer dependency/security scans uit, en test login, rate limits, CSRF, accountgoedkeuring en autorisatie. Schakel MFA in voor het beheerder-account waar mogelijk. Voor delen met andere gebruikers moet Three Way eerst per gebruiker geïsoleerde portefeuilledata afdwingen.
+Je hoeft nu geen domein te kopen. Gebruik de toegewezen `onrender.com`-hostnaam voor een eerste stagingtest. Als je later een domein kiest, voeg je die hostnaam toe in Render, stel je de door Render opgegeven DNS-records in bij TransIP en update je `TRUSTED_HOSTS`. Gebruik de exacte hostnaam en controleer HTTPS vóór je echte privédata gebruikt.
+
+## Security en privacy
+
+- Formulieren gebruiken CSRF-bescherming.
+- Inloggen en accountaanvragen hebben rate limits via Redis.
+- Openbare aanvragen gebruiken Cloudflare Turnstile met server-side verificatie en een honeypot.
+- Wachtwoorden worden gehasht; er staat geen standaard beheerderswachtwoord in de repository.
+- Beheerpagina's vereisen een goedgekeurde admin met het ingestelde admin-e-mailadres.
+- Productie vereist een geheime sleutel, PostgreSQL, Redis, Turnstile en expliciete toegestane hostnamen.
+- Sessiecookies, CSP en securityheaders zijn ingesteld.
+- `.env`, lokale databases en instance-data horen niet in Git.
+
+Dit vermindert risico's maar garandeert geen absolute veiligheid. Voer tests, dependency-scans, back-up- en hersteltests en een handmatige security review uit voor gebruik met echte portefeuillegegevens. Gebruik MFA voor je hosting- en GitHub-account.
 
 ## Three Way
 
-Three Way blijft zelfstandig. Deze portal bevat nog geen beleggingsdata en deelt niets met andere gebruikers. Koppel Three Way pas nadat authenticatie, autorisatie en data-isolatie daar ook server-side zijn gecontroleerd.
+Three Way blijft volledig apart. Dit portaal bevat geen beleggingsdata en de koppeling is nog niet geïmplementeerd. Voordat anderen Three Way mogen gebruiken, moet de beleggingsapp iedere databasequery server-side beperken tot de eigenaar van de data. Alleen een verborgen link of frontendfilter is geen toegangsbeveiliging.
