@@ -1,0 +1,8 @@
+# Keep portfolio and generated state out of version control.
+data/holdings.json
+data/checks.json
+data/rule.json
+data/status.json
+data/snapshots.json
+data/news.json
+data/sentiment.json
