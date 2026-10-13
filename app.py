@@ -101,10 +101,21 @@ def run_three_way(action: str, news: str = "0", intuition: str = "0") -> tuple[i
     root = os.path.realpath(THREE_WAY_PATH)
     if os.path.commonpath([script, root]) != root or not os.path.isfile(script):
         raise RuntimeError("Three Way-bestanden niet gevonden. Controleer de map three-way.")
+    holdings_file = os.path.join(root, "data", "holdings.json")
+    if not os.path.isfile(holdings_file):
+        raise RuntimeError("Portefeuille ontbreekt. Maak three-way/data/holdings.json aan op basis van holdings.example.json; dit bestand wordt niet in Git opgeslagen.")
+    import json
+    try:
+        with open(holdings_file, encoding="utf-8") as handle:
+            holdings_data = json.load(handle)
+        if not holdings_data.get("holdings"):
+            raise RuntimeError("Portefeuille is leeg. Vul three-way/data/holdings.json met je eigen aandelen voordat je een analyse start.")
+    except (OSError, json.JSONDecodeError, AttributeError) as exc:
+        raise RuntimeError("Portefeuillebestand is ongeldig. Controleer three-way/data/holdings.json.") from exc
     if not THREE_WAY_LOCK.acquire(blocking=False):
         raise RuntimeError("Er draait al een Three Way-taak. Wacht tot deze klaar is.")
     try:
-        input_text = f"{news}\\n{intuition}\\n" if action == "main" else ""
+        input_text = f"{news}\n{intuition}\n" if action == "main" else ""
         completed = subprocess.run(
             [os.getenv("THREE_WAY_PYTHON", os.sys.executable), script],
             cwd=root,
