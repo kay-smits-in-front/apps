@@ -8,7 +8,7 @@
   </div>
   <div class="auth-card">
     <div class="card-icon">↗</div>
-    <h2>Welkom terug</h2><p class="muted">Log in op je persoonlijke omgeving.</p>
+    <h2>Welkom terug</h2>
     <form method="post" class="form">
       {{ form.hidden_tag() }}
       {{ form.email.label }}{{ form.email(placeholder="jij@voorbeeld.nl", autocomplete="email") }}
@@ -18,7 +18,6 @@
       {{ form.submit(class_="primary-button") }}
     </form>
     <div class="auth-bottom">Nog geen toegang? <a href="{{ url_for('request_access') }}">Vraag toegang aan</a></div>
-    <div class="secure-note"><span>▣</span> Alleen goedgekeurde accounts krijgen toegang</div>
   </div>
 </section>
 {% endblock %}
