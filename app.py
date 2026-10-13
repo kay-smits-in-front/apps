@@ -134,7 +134,7 @@ def run_three_way(action: str, news: str = "0", intuition: str = "0") -> tuple[i
         output = exc.stdout or ""
         if isinstance(output, bytes):
             output = output.decode("utf-8", errors="replace")
-        return 124, str(output)[-20000:] + "\\n\\nTaak afgebroken: time-out bereikt."
+        return 124, str(output)[-20000:] + "\n\nTaak afgebroken: time-out bereikt."
     finally:
         THREE_WAY_LOCK.release()
 
