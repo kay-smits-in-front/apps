@@ -1,4 +1,6 @@
 import os
+import subprocess
+import threading
 import smtplib
 import urllib.parse
 import urllib.request
@@ -80,6 +82,61 @@ limiter = Limiter(get_remote_address, app=app, storage_uri=RATELIMIT_STORAGE_URI
 login_manager = LoginManager(app)
 login_manager.login_view = "login"
 login_manager.login_message = "Log eerst in om deze pagina te bekijken."
+
+# Three Way runs only from the bundled folder and is disabled on hosted production
+# until an isolated, persistent worker is configured. This avoids running portfolio
+# scripts in a short-lived web dyno or exposing personal data to a shared service.
+THREE_WAY_PATH = os.path.abspath(os.getenv("THREE_WAY_PATH", os.path.join(os.path.dirname(__file__), "three-way")))
+THREE_WAY_TIMEOUT = min(max(int(os.getenv("THREE_WAY_TIMEOUT", "180")), 10), 600)
+THREE_WAY_LOCK = threading.Lock()
+THREE_WAY_ACTIONS = {"main": "main.py", "backcasting": "backcasting.py", "walkforward": "walkforward.py"}
+
+
+def run_three_way(action: str, news: str = "0", intuition: str = "0") -> tuple[int, str]:
+    if action not in THREE_WAY_ACTIONS:
+        raise ValueError("Onbekende Three Way-taak.")
+    if IS_PRODUCTION:
+        raise RuntimeError("Three Way-uitvoering is op Render uitgeschakeld totdat een geïsoleerde worker en persistente opslag zijn ingericht.")
+    script = os.path.realpath(os.path.join(THREE_WAY_PATH, THREE_WAY_ACTIONS[action]))
+    root = os.path.realpath(THREE_WAY_PATH)
+    if os.path.commonpath([script, root]) != root or not os.path.isfile(script):
+        raise RuntimeError("Three Way-bestanden niet gevonden. Controleer de map three-way.")
+    holdings_file = os.path.join(root, "data", "holdings.json")
+    if not os.path.isfile(holdings_file):
+        raise RuntimeError("Portefeuille ontbreekt. Maak three-way/data/holdings.json aan op basis van holdings.example.json; dit bestand wordt niet in Git opgeslagen.")
+    import json
+    try:
+        with open(holdings_file, encoding="utf-8") as handle:
+            holdings_data = json.load(handle)
+        if not holdings_data.get("holdings"):
+            raise RuntimeError("Portefeuille is leeg. Vul three-way/data/holdings.json met je eigen aandelen voordat je een analyse start.")
+    except (OSError, json.JSONDecodeError, AttributeError) as exc:
+        raise RuntimeError("Portefeuillebestand is ongeldig. Controleer three-way/data/holdings.json.") from exc
+    if not THREE_WAY_LOCK.acquire(blocking=False):
+        raise RuntimeError("Er draait al een Three Way-taak. Wacht tot deze klaar is.")
+    try:
+        input_text = f"{news}\n{intuition}\n" if action == "main" else ""
+        completed = subprocess.run(
+            [os.getenv("THREE_WAY_PYTHON", os.sys.executable), script],
+            cwd=root,
+            input=input_text,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            timeout=THREE_WAY_TIMEOUT,
+            check=False,
+            shell=False,
+            env={**os.environ, "PYTHONUNBUFFERED": "1"},
+        )
+        output = completed.stdout[-24000:]
+        return completed.returncode, output or "De taak gaf geen uitvoer."
+    except subprocess.TimeoutExpired as exc:
+        output = exc.stdout or ""
+        if isinstance(output, bytes):
+            output = output.decode("utf-8", errors="replace")
+        return 124, str(output)[-20000:] + "\n\nTaak afgebroken: time-out bereikt."
+    finally:
+        THREE_WAY_LOCK.release()
 
 
 class User(UserMixin, db.Model):
@@ -185,7 +242,7 @@ def add_security_headers(response):
         "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; "
         "form-action 'self'; img-src 'self' data:; style-src 'self'; "
         "script-src 'self' https://challenges.cloudflare.com; "
-        "frame-src https://challenges.cloudflare.com; connect-src 'self' https://challenges.cloudflare.com",
+        "frame-src https://challenges.cloudflare.com https://playcanv.as; connect-src 'self' https://challenges.cloudflare.com",
     )
     if IS_PRODUCTION:
         response.headers.setdefault("Strict-Transport-Security", "max-age=31536000")
@@ -266,6 +323,50 @@ def dashboard():
     apps = [{"name": "Three Way", "description": "Beleggingsanalyse en portefeuille-inzichten.",
              "status": "Koppeling volgt", "icon": "↗", "url": None}]
     return render_template("dashboard.html", apps=apps)
+
+
+@app.route("/apps/three-way", methods=["GET", "POST"])
+@login_required
+@limiter.limit("3 per hour", methods=["POST"])
+def three_way():
+    if not current_user.approved:
+        abort(403)
+    output = None
+    exit_code = None
+    selected_action = "backcasting"
+    news = "0"
+    intuition = "0"
+    if request.method == "POST":
+        selected_action = request.form.get("action", "")
+        news = request.form.get("news", "0").strip().replace(",", ".")
+        intuition = request.form.get("intuition", "0").strip().replace(",", ".")
+        if selected_action not in THREE_WAY_ACTIONS:
+            abort(400)
+        if selected_action == "main":
+            try:
+                if not -5 <= float(news) <= 5 or not -5 <= float(intuition) <= 5:
+                    raise ValueError
+            except ValueError:
+                flash("Nieuws en intuïtie moeten tussen -5 en +5 liggen.", "error")
+                return render_template("three_way.html", output=None, exit_code=None, selected_action=selected_action, news=news, intuition=intuition)
+            if request.form.get("confirm_main") != "yes":
+                flash("Bevestig eerst dat main.py een check opslaat in de Three Way-data.", "error")
+                return render_template("three_way.html", output=None, exit_code=None, selected_action=selected_action, news=news, intuition=intuition)
+        try:
+            exit_code, output = run_three_way(selected_action, news, intuition)
+        except (RuntimeError, ValueError) as exc:
+            output = str(exc)
+            exit_code = 1
+        app.logger.info("Three Way-taak %s eindigde met code %s", selected_action, exit_code)
+    return render_template("three_way.html", output=output, exit_code=exit_code, selected_action=selected_action, news=news, intuition=intuition)
+
+
+@app.route("/apps/thinkwave")
+@login_required
+def thinkwave():
+    if not current_user.approved:
+        abort(403)
+    return render_template("thinkwave.html")
 
 
 @app.route("/admin/users")

@@ -1,15 +1,18 @@
 {% extends "base.html" %}
 {% block title %}Dashboard · kay.apps{% endblock %}
 {% block content %}
-<div class="section-label"><span>JOUW APPS</span><span class="section-count">01 / IN OPBOUW</span></div>
+<div class="section-label"><span>JOUW APPS</span><span class="section-count">02 / BESCHIKBAAR</span></div>
 <section class="app-grid">
-  {% for item in apps %}
-  <article class="app-card">
-    <div class="app-card-top"><div class="app-icon">{{ item.icon }}</div><span class="status"><span></span>{{ item.status }}</span></div>
-    <h2>{{ item.name }}</h2><p>{{ item.description }}</p>
+  <a class="app-card app-card-link" href="{{ url_for('three_way') }}">
+    <div class="app-card-top"><div class="app-icon">↗</div><span class="status"><span></span>Lokale runner</span></div>
+    <h2>Three Way</h2><p>Beleggingsanalyse, portefeuille-inzichten, backcasting en walk-forward tests.</p>
     <div class="app-card-bottom"><span class="app-type">FINANCE · ANALYSE</span><span class="arrow">↗</span></div>
-  </article>
-  {% endfor %}
+  </a>
+  <a class="app-card app-card-link" href="{{ url_for('thinkwave') }}">
+    <div class="app-card-top"><div class="app-icon">✳</div><span class="status"><span></span>PlayCanvas</span></div>
+    <h2>Thinkwave</h2><p>Open de Thinkwave-ervaring vanuit je persoonlijke app-portaal.</p>
+    <div class="app-card-bottom"><span class="app-type">THINKING · PLAY</span><span class="arrow">↗</span></div>
+  </a>
   <article class="app-card add-card"><div class="add-symbol">+</div><h2>Meer volgt</h2><p>Nieuwe persoonlijke apps verschijnen hier zodra je ze toevoegt.</p><div class="app-card-bottom"><span class="app-type">YOUR NEXT IDEA</span><span class="arrow">✳</span></div></article>
 </section>
 {% endblock %}

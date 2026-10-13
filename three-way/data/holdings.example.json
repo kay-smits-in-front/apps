@@ -1,0 +1,9 @@
+{
+  "holdings": [
+    {
+      "ticker": "NVDA",
+      "quantity": 1,
+      "cost_eur": 100.0
+    }
+  ]
+}

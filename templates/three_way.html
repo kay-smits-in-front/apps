@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Three Way · kay.apps{% endblock %}
+{% block content %}
+<div class="subnav"><a href="{{ url_for('dashboard') }}">← Dashboard</a><a href="{{ url_for('thinkwave') }}">Thinkwave →</a></div>
+<p class="eyebrow">FINANCE · PORTFOLIO</p><h1 class="page-title">Three Way</h1>
+<p class="page-intro">Voer de beleggingsanalyse uit of bekijk de backtests. Resultaten verschijnen hieronder. Een main-check kan lokale Three Way-data aanpassen.</p>
+<section class="tool-panel"><h2>Analyse en backtests</h2><p>Kies een taak. Main gebruikt nieuws en intuïtie van -5 tot +5.</p>
+<form class="tool-form" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<label class="full">Taak<select name="action"><option value="main" {% if selected_action == 'main' %}selected{% endif %}>Main — actuele analyse</option><option value="backcasting" {% if selected_action == 'backcasting' %}selected{% endif %}>Backcasting — laatste 92 dagen</option><option value="walkforward" {% if selected_action == 'walkforward' %}selected{% endif %}>Walk-forward — regel testen</option></select></label>
+<label>Nieuwsinschatting (-5 tot +5)<input name="news" type="number" min="-5" max="5" step="0.5" value="{{ news }}" required></label><label>Marktintuïtie (-5 tot +5)<input name="intuition" type="number" min="-5" max="5" step="0.5" value="{{ intuition }}" required></label>
+<label class="full check-row"><input type="checkbox" name="confirm_main" value="yes"> Ik begrijp dat main.py de checkgeschiedenis en kasstatus kan aanpassen.</label><button class="primary-button full" type="submit">Taak uitvoeren</button></form>
+<p class="helper">Alleen goedgekeurde gebruikers. Op Render is uitvoeren uitgeschakeld tot een aparte worker en persistente opslag zijn ingericht.</p></section>
+{% if output is not none %}<section class="tool-panel"><h2>Uitvoer · exit {{ exit_code }}</h2><pre class="output-panel">{{ output }}</pre></section>{% endif %}
+{% endblock %}
