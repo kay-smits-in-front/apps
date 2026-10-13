@@ -231,7 +231,7 @@ def add_security_headers(response):
         "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; "
         "form-action 'self'; img-src 'self' data:; style-src 'self'; "
         "script-src 'self' https://challenges.cloudflare.com; "
-        "frame-src https://challenges.cloudflare.com; connect-src 'self' https://challenges.cloudflare.com",
+        "frame-src https://challenges.cloudflare.com https://playcanv.as; connect-src 'self' https://challenges.cloudflare.com",
     )
     if IS_PRODUCTION:
         response.headers.setdefault("Strict-Transport-Security", "max-age=31536000")
