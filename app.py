@@ -103,7 +103,7 @@ def run_three_way(action: str, news: str = "0", intuition: str = "0") -> tuple[i
         raise RuntimeError("Three Way-bestanden niet gevonden. Controleer de map three-way.")
     holdings_file = os.path.join(root, "data", "holdings.json")
     if not os.path.isfile(holdings_file):
-        raise RuntimeError("Portefeuille ontbreekt. Maak three-way/data/holdings.json aan op basis van holdings.example.json; dit bestand wordt niet in Git opgeslagen.")
+        raise RuntimeError("Portefeuille ontbreekt. Maak three-way/data/holdings.json aan op basis van holdings.json; dit bestand wordt niet in Git opgeslagen.")
     import json
     try:
         with open(holdings_file, encoding="utf-8") as handle:
