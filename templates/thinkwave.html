@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}Thinkwave · kay.apps{% endblock %}
+{% block content %}
+<div class="subnav"><a href="{{ url_for('dashboard') }}">← Dashboard</a><a href="{{ url_for('three_way') }}">Three Way →</a></div>
+<p class="eyebrow">THINKING · PLAYCANVAS</p><h1 class="page-title">Thinkwave</h1>
+<p class="page-intro">De Thinkwave-ervaring draait in een apart PlayCanvas-project. Het project blijft gescheiden van de Flask-app en gebruikt geen toegang tot je Three Way-portefeuille.</p>
+<section class="tool-panel"><iframe class="thinkwave-frame" src="https://playcanv.as/p/f8c12796/" title="Thinkwave PlayCanvas" loading="lazy" allow="fullscreen; gamepad" referrerpolicy="strict-origin-when-cross-origin"></iframe>
+<p class="helper">Werkt de ingebedde weergave niet? <a href="https://playcanv.as/p/f8c12796/" target="_blank" rel="noopener noreferrer">Open Thinkwave rechtstreeks in PlayCanvas ↗</a></p></section>
+{% endblock %}
