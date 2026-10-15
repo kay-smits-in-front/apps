@@ -361,6 +361,80 @@ def three_way():
     return render_template("three_way.html", output=output, exit_code=exit_code, selected_action=selected_action, news=news, intuition=intuition)
 
 
+RULE_FIELDS = {
+    "lookback_days": (1, 20, int), "up_pct": (0.5, 200, float), "down_pct": (0.5, 100, float),
+    "stop_pct": (0.5, 100, float), "floor_pct": (0.5, 100, float), "regime_pct": (5, 300, float),
+    "turn_pct": (0.5, 50, float), "review_days": (1, 20, int),
+}
+
+
+def read_number(raw, low, high, kind):
+    value = kind(str(raw).replace(",", "."))
+    if not low <= value <= high:
+        raise ValueError("buiten bereik")
+    return value
+
+
+def read_score(raw):
+    """A score from -5 to +5, or None when the factor is switched off."""
+    if raw in (None, "", "off"):
+        return None
+    return read_number(raw, -5, 5, float)
+
+
+def scenario_from_args(args, defaults):
+    """The scenario of the request. Missing fields keep the default setting."""
+    from functioning.dashboard import Scenario
+    from functioning.rule import Rule
+    values = dict(vars(defaults.rule))
+    for field, (low, high, kind) in RULE_FIELDS.items():
+        if args.get(field):
+            values[field] = read_number(args[field], low, high, kind)
+    news = read_score(args["news"]) if "news" in args else defaults.news
+    intuition = read_score(args["intuition"]) if "intuition" in args else defaults.intuition
+    return Scenario(Rule(**values), news, intuition)
+
+
+def three_way_import():
+    """Make the bundled Three Way code importable for the dashboard."""
+    import sys
+    if THREE_WAY_PATH not in sys.path:
+        sys.path.insert(0, THREE_WAY_PATH)
+
+
+@app.route("/apps/three-way/dashboard")
+@login_required
+def three_way_dashboard():
+    if not current_user.approved:
+        abort(403)
+    defaults = None
+    if not IS_PRODUCTION:
+        three_way_import()
+        from functioning.dashboard import default_scenario
+        scenario = default_scenario()
+        defaults = {**vars(scenario.rule), "news": scenario.news, "intuition": scenario.intuition}
+    return render_template("three_way_dashboard.html", defaults=defaults, disabled=IS_PRODUCTION)
+
+
+@app.route("/apps/three-way/dashboard/data")
+@login_required
+@limiter.limit("120 per hour")
+def three_way_dashboard_data():
+    if not current_user.approved:
+        abort(403)
+    if IS_PRODUCTION:
+        return {"error": "Het dashboard is op Render uitgeschakeld totdat persistente opslag is ingericht."}, 503
+    three_way_import()
+    from functioning.dashboard import dashboard_data, default_scenario
+    try:
+        scenario = scenario_from_args(request.args, default_scenario())
+        window = int(read_number(request.args.get("days", "180"), 30, 1825, float))
+    except ValueError:
+        return {"error": "Ongeldige instelling."}, 400
+    with THREE_WAY_LOCK:
+        return dashboard_data(scenario, window)
+
+
 @app.route("/apps/thinkwave")
 @login_required
 def thinkwave():

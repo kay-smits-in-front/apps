@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Three Way dashboard · kay.apps{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
+<div class="subnav"><a href="{{ url_for('three_way') }}">← Three Way</a><a href="{{ url_for('dashboard') }}">Dashboard</a></div>
+<p class="eyebrow">FINANCE · INZICHT</p><h1 class="page-title">Three Way dashboard</h1>
+{% if disabled %}
+<section class="tool-panel"><p>Het dashboard draait alleen lokaal. Op Render is het uitgeschakeld tot er persistente opslag is.</p></section>
+{% else %}
+<div id="dash" data-defaults='{{ defaults|tojson }}' data-source="{{ url_for('three_way_dashboard_data') }}">
+  <section class="tool-panel">
+    <h2>Wat als?</h2>
+    <p>Regel A is je huidige instelling. Zet regel B aan om twee regels naast elkaar te zien. Nieuws en intuïtie kun je uitzetten of op een vaste waarde zetten.</p>
+    <div class="presets" id="presets"></div>
+    <div class="scenario-grid">
+      <fieldset data-scenario="a"><legend>Regel A</legend><div class="fields"></div></fieldset>
+      <fieldset data-scenario="b" class="off"><legend><label><input type="checkbox" id="b-on"> Regel B</label></legend><div class="fields"></div></fieldset>
+    </div>
+    <div class="toolbar">
+      <label>Periode
+        <select id="window"><option value="90">3 maanden</option><option value="180" selected>6 maanden</option><option value="365">1 jaar</option><option value="730">2 jaar</option></select>
+      </label>
+      <label><input type="checkbox" id="max-on" checked> Maximum in grafiek</label>
+      <button class="primary-button" id="run" type="button">Bereken</button>
+      <span class="helper" id="status"></span>
+    </div>
+  </section>
+
+  <section class="tool-panel"><h2>Uitkomst</h2><div class="tiles" id="tiles"></div></section>
+
+  <section class="tool-panel">
+    <h2>Waarde van de portefeuille</h2>
+    <div class="legend" id="legend"></div>
+    <div class="chart" id="value-chart"></div>
+    <p class="helper">Driehoeken: verkoop (omlaag) en terugkoop (omhoog) van regel A. Ruiten: wat echt (fictief) is uitgevoerd.</p>
+  </section>
+
+  <section class="tool-panel">
+    <h2>Koersen vergelijken</h2>
+    <p>Alle koersen starten op 100. Klik een aandeel aan of uit.</p>
+    <div class="chips" id="chips"></div>
+    <div class="chart" id="price-chart"></div>
+  </section>
+
+  <section class="tool-panel"><h2>Verkopen en wat ze opleverden</h2><div id="sales"></div></section>
+  <section class="tool-panel"><h2>Per aandeel</h2><div id="stocks"></div></section>
+</div>
+<script src="{{ url_for('static', filename='js/dashboard.js') }}" defer></script>
+{% endif %}
+{% endblock %}
