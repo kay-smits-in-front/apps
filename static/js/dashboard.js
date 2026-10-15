@@ -161,15 +161,17 @@
       title: `${s.ticker} ${mk.action === "sell" ? "verkocht" : "gekocht"} op ${mk.day} voor ${mk.price}`,
     })));
   }
+  const costText = (c) => (c ? `${c.sells + c.buys} transacties, kosten ${euro(c.costs)}` : "");
   function renderTiles(a, b) {
     const hold = last(a.total.hold);
-    const items = [["Hold", hold], [b ? "Regel A" : "Regel", last(a.total.rule)]];
-    if (b) items.push(["Regel B", last(b.total.rule)]);
-    items.push(["Uitgevoerd", last(a.total.executed)], ["Maximum", last(a.total.max)]);
-    el("tiles").replaceChildren(...items.map(([name, value]) => {
+    const items = [["Hold", hold, null], [b ? "Regel A" : "Regel", last(a.total.rule), a.costs.rule]];
+    if (b) items.push(["Regel B", last(b.total.rule), b.costs.rule]);
+    items.push(["Uitgevoerd", last(a.total.executed), a.costs.executed], ["Maximum", last(a.total.max), a.costs.max]);
+    el("tiles").replaceChildren(...items.map(([name, value, costs]) => {
       const tile = html("div", "tile");
       const text = name === "Hold" ? "start " + euro(a.total.hold[0]) : `${signed(value - hold)} t.o.v. hold`;
       tile.append(html("div", "k", name), html("div", "v", euro(value)), html("div", `d ${name === "Hold" ? "" : tone(value - hold)}`, text));
+      if (costs) tile.append(html("div", "k", costText(costs)));
       return tile;
     }));
   }
@@ -244,8 +246,10 @@
   }
   function renderStocks(a) {
     const rows = a.stocks.map((s) => [s.ticker, euro(last(s.hold)), colored(last(s.rule) - last(s.hold)),
+      `${s.costs.rule.sells + s.costs.rule.buys} / ${euro(s.costs.rule.costs)}`,
       colored(last(s.executed) - last(s.hold)), colored(last(s.max) - last(s.hold))]);
-    el("stocks").replaceChildren(table(["Aandeel", "Hold nu", "Regel A t.o.v. hold", "Uitgevoerd t.o.v. hold", "Maximum t.o.v. hold"], rows));
+    el("stocks").replaceChildren(table(["Aandeel", "Hold nu", "Regel A t.o.v. hold", "Transacties / kosten A",
+      "Uitgevoerd t.o.v. hold", "Maximum t.o.v. hold"], rows));
   }
   function render() {
     const a = state.data;

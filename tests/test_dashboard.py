@@ -127,3 +127,15 @@ def test_page_loads_with_defaults(client):
     response = client.get("/apps/three-way/dashboard")
     assert response.status_code == 200
     assert b"dashboard.js" in response.data
+
+
+def test_every_carried_out_trade_costs_395(data_files):
+    from functioning.constants import TRANSACTION_COST_EUR
+    assert TRANSACTION_COST_EUR == 3.95
+    out = run(data_files, Scenario(LIVE))
+    rule = out["costs"]["rule"]
+    assert rule["costs"] == pytest.approx((rule["sells"] + rule["buys"]) * 3.95)
+    assert out["costs"]["hold"] == {"sells": 0, "buys": 0, "costs": 0}
+    assert out["costs"]["executed"]["sells"] == 1
+    per_stock = sum(s["costs"]["rule"]["costs"] for s in out["stocks"])
+    assert per_stock == pytest.approx(rule["costs"])

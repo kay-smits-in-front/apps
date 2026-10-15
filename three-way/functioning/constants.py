@@ -46,8 +46,8 @@ GROWTH_FULL_SCORE_PCT = 25.0  # revenue growth of 25% = score +5
 DEBT_NEUTRAL_PCT = 100.0      # debt/equity of 100% = score 0
 DEBT_PCT_PER_POINT = 40.0     # every 40 points more debt = 1 point lower
 
-# Transaction costs (DEGIRO, about 3 euro per buy or sell)
-TRANSACTION_COST_EUR = 3.0
+# Transaction costs (DEGIRO, 3.95 euro per buy or sell, for every stock)
+TRANSACTION_COST_EUR = 3.95
 COST_COVER_FACTOR = 2.0       # expected move must be this many times the round trip cost
 
 # Start settings of the rule. main uses the setting that `python walkforward.py` saved in
