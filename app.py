@@ -418,7 +418,7 @@ def three_way_dashboard():
 
 @app.route("/apps/three-way/dashboard/data")
 @login_required
-@limiter.limit("120 per hour")
+@limiter.limit("1200 per hour", override_defaults=True)
 def three_way_dashboard_data():
     if not current_user.approved:
         abort(403)

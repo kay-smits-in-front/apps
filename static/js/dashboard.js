@@ -258,6 +258,10 @@
   // ------------------------------------------------------------- run
   async function load(which) {
     const response = await fetch(`${source}?${query(which)}`, { credentials: "same-origin" });
+    if (response.status === 429) throw new Error("Te veel verzoeken, wacht even en probeer opnieuw.");
+    if (response.redirected || !(response.headers.get("content-type") || "").includes("json")) {
+      throw new Error("Server gaf geen data terug (status " + response.status + "). Log opnieuw in of kijk in de terminal.");
+    }
     const body = await response.json();
     if (!response.ok) throw new Error(body.error || "Fout");
     return body;
