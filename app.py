@@ -392,7 +392,22 @@ def scenario_from_args(args, defaults):
             values[field] = read_number(args[field], low, high, kind)
     news = read_score(args["news"]) if "news" in args else defaults.news
     intuition = read_score(args["intuition"]) if "intuition" in args else defaults.intuition
-    return Scenario(Rule(**values), news, intuition)
+    return Scenario(Rule(**values), news, intuition, plan_from_args(args))
+
+
+def plan_from_args(args):
+    """The plan per group, when the request asks for it (plan=<json>). Otherwise None."""
+    import json
+    from functioning.groups import plan_from_json
+    raw = args.get("plan")
+    if not raw:
+        return None
+    if len(raw) > 4000:
+        raise ValueError("plan te groot")
+    parsed = json.loads(raw)
+    if not isinstance(parsed, dict):
+        raise ValueError("plan ongeldig")
+    return plan_from_json(parsed)
 
 
 def three_way_import():
@@ -412,7 +427,11 @@ def three_way_dashboard():
         three_way_import()
         from functioning.dashboard import default_scenario
         scenario = default_scenario()
-        defaults = {**vars(scenario.rule), "news": scenario.news, "intuition": scenario.intuition}
+        from functioning.constants import GROUP_LABELS
+        from functioning.groups import default_plan
+        plan = default_plan()
+        defaults = {**vars(scenario.rule), "news": scenario.news, "intuition": scenario.intuition,
+                    "plan": {"groups": plan.groups, "settings": plan.settings, "labels": GROUP_LABELS}}
     return render_template("three_way_dashboard.html", defaults=defaults, disabled=IS_PRODUCTION)
 
 
@@ -429,7 +448,7 @@ def three_way_dashboard_data():
     try:
         scenario = scenario_from_args(request.args, default_scenario())
         window = int(read_number(request.args.get("days", "180"), 30, 1825, float))
-    except ValueError:
+    except (ValueError, TypeError, AttributeError):
         return {"error": "Ongeldige instelling."}, 400
     with THREE_WAY_LOCK:
         return dashboard_data(scenario, window)

@@ -16,7 +16,9 @@
     ["Nieuws altijd -1", { news: -1 }],
     ["Nieuws en intuïtie uit", { news: null, intuition: null }],
   ];
-  const state = { a: { ...defaults }, b: { ...defaults }, data: null, dataB: null, picked: new Set() };
+  const plan = defaults.plan;
+  const TREND_FIELDS = [["ma_days", "Gemiddelde (dgn)"], ["band_pct", "Band %"], ["review_days", "Check elke (dgn)"]];
+  const state = { a: { ...defaults }, b: { ...defaults }, data: null, dataB: null, picked: new Set(), groups: { ...plan.groups } };
   const el = (id) => document.getElementById(id);
   const euro = (v) => new Intl.NumberFormat("nl-NL", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(v);
   const signed = (v) => (v >= 0 ? "+" : "") + euro(v);
@@ -74,9 +76,50 @@
     });
     return out;
   }
+  // ---------------------------------------------------------- groups
+  const groupFields = (group) => (group === "peak" ? TREND_FIELDS : RULE_FIELDS);
+  function buildGroupFields() {
+    el("group-fields").replaceChildren(...Object.keys(plan.labels).map((group) => {
+      const box = html("fieldset"); box.dataset.group = group;
+      box.append(html("legend", "", plan.labels[group]));
+      const fields = html("div", "fields");
+      groupFields(group).forEach(([key, label]) => {
+        const field = numberField(key, label);
+        field.querySelector("input").value = plan.settings[group][key];
+        fields.append(field);
+      });
+      box.append(fields);
+      return box;
+    }));
+  }
+  function buildAssignment(tickers) {
+    const all = [...new Set([...Object.keys(state.groups), ...tickers])].sort();
+    el("group-assign").replaceChildren(...all.map((ticker) => {
+      const label = html("label", "", ticker);
+      const select = html("select"); select.dataset.ticker = ticker;
+      const none = html("option", "", "geen groep"); none.value = "";
+      select.append(none, ...Object.entries(plan.labels).map(([g, text]) => {
+        const option = html("option", "", text); option.value = g; return option;
+      }));
+      select.value = state.groups[ticker] || "";
+      select.addEventListener("change", () => { state.groups[ticker] = select.value; });
+      label.append(select);
+      return label;
+    }));
+  }
+  function readPlan() {
+    const settings = {};
+    document.querySelectorAll("#group-fields fieldset").forEach((box) => {
+      settings[box.dataset.group] = {};
+      box.querySelectorAll("input[data-key]").forEach((input) => { settings[box.dataset.group][input.dataset.key] = Number(input.value); });
+    });
+    const groups = Object.fromEntries(Object.entries(state.groups).filter(([, g]) => g));
+    return { groups, settings };
+  }
   function query(which) {
     const params = new URLSearchParams({ days: el("window").value });
     Object.entries(readFields(which)).forEach(([k, v]) => params.set(k, v === null ? "off" : v));
+    if (which === "a" && el("groups-on").checked) params.set("plan", JSON.stringify(readPlan()));
     return params;
   }
   function toggleB() {
@@ -245,17 +288,32 @@
       : html("p", "helper", "Regel A verkoopt in deze periode niets."));
   }
   function renderStocks(a) {
-    const rows = a.stocks.map((s) => [s.ticker, euro(last(s.hold)), colored(last(s.rule) - last(s.hold)),
+    const rows = a.stocks.map((s) => [s.ticker + (s.group ? ` (${plan.labels[s.group]})` : ""), euro(last(s.hold)), colored(last(s.rule) - last(s.hold)),
       `${s.costs.rule.sells + s.costs.rule.buys} / ${euro(s.costs.rule.costs)}`,
       colored(last(s.executed) - last(s.hold)), colored(last(s.max) - last(s.hold))]);
     el("stocks").replaceChildren(table(["Aandeel", "Hold nu", "Regel A t.o.v. hold", "Transacties / kosten A",
       "Uitgevoerd t.o.v. hold", "Maximum t.o.v. hold"], rows));
   }
+  function renderGroups(a) {
+    const usingGroups = el("groups-on").checked;
+    el("group-results").hidden = !usingGroups;
+    if (!usingGroups) return;
+    const rows = Object.entries(plan.labels).map(([group, text]) => {
+      const members = a.stocks.filter((s) => s.group === group);
+      const sum = (f) => members.reduce((t, s) => t + f(s), 0);
+      const costs = sum((s) => s.costs.rule.costs), moves = sum((s) => s.costs.rule.sells + s.costs.rule.buys);
+      return [text, members.map((s) => s.ticker).join(", ") || "-", euro(sum((s) => last(s.hold))),
+        colored(sum((s) => last(s.rule) - last(s.hold))), `${moves} / ${euro(costs)}`,
+        colored(sum((s) => last(s.max) - last(s.hold)))];
+    });
+    el("groups").replaceChildren(table(["Groep", "Aandelen", "Hold nu", "Regel t.o.v. hold", "Transacties / kosten", "Maximum t.o.v. hold"], rows));
+  }
   function render() {
     const a = state.data;
     if (!state.picked.size) a.stocks.slice(0, 5).forEach((s) => state.picked.add(s.ticker));
     renderTiles(a, state.dataB); renderValue(a, state.dataB);
-    renderChips(a); renderPrices(a); renderSales(a); renderStocks(a);
+    renderChips(a); renderPrices(a); renderSales(a); renderStocks(a); renderGroups(a);
+    buildAssignment(a.stocks.map((s) => s.ticker));
     if (a.failed.length) el("status").textContent = "Geen koersen voor: " + a.failed.join(", ");
   }
 
@@ -292,6 +350,8 @@
     button.addEventListener("click", () => { applyPreset(patch); run(); });
     return button;
   }));
+  buildGroupFields(); buildAssignment([]);
+  el("groups-on").addEventListener("change", () => { el("group-panel").hidden = !el("groups-on").checked; });
   el("b-on").addEventListener("change", toggleB);
   el("run").addEventListener("click", run);
   el("max-on").addEventListener("change", () => { if (state.data) render(); });

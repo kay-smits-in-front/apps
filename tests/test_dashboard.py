@@ -139,3 +139,54 @@ def test_every_carried_out_trade_costs_395(data_files):
     assert out["costs"]["executed"]["sells"] == 1
     per_stock = sum(s["costs"]["rule"]["costs"] for s in out["stocks"])
     assert per_stock == pytest.approx(rule["costs"])
+
+
+# ------------------------------------------------------------- groups
+
+
+def test_trend_rule_sells_under_and_buys_above_the_average():
+    from functioning.rule import Signal, TrendRule
+    rule = TrendRule(ma_days=5, band_pct=3.0, review_days=1)
+    falling = [100.0] * 10 + [90.0]
+    rising = [100.0] * 10 + [110.0]
+    assert rule.trend_outcome(falling, 10, invested=True).signal is Signal.SELL
+    assert rule.trend_outcome(falling, 10, invested=False).signal is Signal.NONE
+    assert rule.trend_outcome(rising, 10, invested=False).signal is Signal.BUY
+    assert rule.trend_outcome(rising, 10, invested=True).signal is Signal.NONE
+    assert rule.trend_outcome([100.0] * 3, 2, invested=True).signal is Signal.NONE
+
+
+def test_plan_rejects_unknown_group_and_out_of_range_values():
+    from functioning.groups import default_plan, plan_from_json
+    with pytest.raises(ValueError):
+        plan_from_json({"groups": {"AAA": "nonsense"}})
+    with pytest.raises(ValueError):
+        plan_from_json({"groups": {}, "settings": {"peak": {"ma_days": 9999}}})
+    plan = plan_from_json({"groups": {"AAA": "peak"}})
+    assert plan.settings["volatile"] == default_plan().settings["volatile"]
+
+
+def test_each_group_follows_its_own_rule(data_files):
+    from functioning.groups import plan_from_json
+    from functioning.rule import Rule, TrendRule
+    plan = plan_from_json({"groups": {"AAA": "peak", "BBB": "calm"}})
+    scenario = Scenario(LIVE, None, None, plan)
+    assert isinstance(scenario.strategy("AAA"), TrendRule)
+    assert isinstance(scenario.strategy("BBB"), Rule) and scenario.strategy("BBB") != LIVE
+    assert scenario.strategy("ZZZ") == LIVE
+    out = run(data_files, scenario)
+    assert [s["group"] for s in out["stocks"]] == ["peak", "calm"]
+    assert "trend" in out["stocks"][0]["strategy"]
+    assert out["stocks"][0]["costs"]["rule"]["sells"] > 0
+
+
+def test_route_accepts_a_plan_and_rejects_a_bad_one(client, monkeypatch, data_files):
+    import functioning.dashboard as module
+    cache, holdings, ledger = data_files
+    original = module.dashboard_data
+    monkeypatch.setattr(module, "dashboard_data", lambda scenario, window: original(scenario, window, cache, holdings, ledger, TODAY))
+    good = json.dumps({"groups": {"AAA": "peak"}, "settings": {"peak": {"ma_days": 10, "band_pct": 2, "review_days": 1}}})
+    assert client.get("/apps/three-way/dashboard/data", query_string={"plan": good}).status_code == 200
+    assert client.get("/apps/three-way/dashboard/data", query_string={"plan": "{nope"}).status_code == 400
+    bad = json.dumps({"groups": {"AAA": "x"}})
+    assert client.get("/apps/three-way/dashboard/data", query_string={"plan": bad}).status_code == 400

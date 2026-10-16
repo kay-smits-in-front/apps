@@ -2,6 +2,7 @@
 setting, and the maximum (perfect foresight), per stock and for the portfolio, in euro."""
 
 from functioning.constants import CONTEXT_VETO, TRANSACTION_COST_EUR, WEIGHT_INTUITION, WEIGHT_NEWS
+from functioning.groups import Plan
 from functioning.imports import dataclass, date, timedelta
 from functioning.market import Holdings
 from functioning.prices import PriceCache, Series
@@ -18,6 +19,11 @@ class Scenario:
     rule: Rule
     news: float | None = None
     intuition: float | None = None
+    plan: Plan | None = None  # when set, every stock in the plan follows the rule of its group
+
+    def strategy(self, ticker: str):
+        """The rule that applies to this stock."""
+        return (self.plan.strategy_for(ticker) if self.plan else None) or self.rule
 
     def context(self) -> float:
         parts = [(v, w) for v, w in ((self.news, WEIGHT_NEWS), (self.intuition, WEIGHT_INTUITION)) if v is not None]
@@ -39,10 +45,10 @@ def vetoed(signal: Signal, context: float, veto: float) -> bool:
     return (signal is Signal.SELL and context >= veto) or (signal is Signal.BUY and context <= -veto)
 
 
-def rule_moves(closes: list[float], scenario: Scenario, first: int, last: int, value_eur: float, veto: float) -> list[Move]:
-    """Run the rule from `first` to `last`. A signal at a close is traded at the next close."""
-    rule, moves, invested = scenario.rule, [], True
-    context, wealth = scenario.context(), value_eur
+def rule_moves(closes: list[float], rule, context: float, first: int, last: int, value_eur: float, veto: float) -> list[Move]:
+    """Run a rule (Rule or TrendRule) from `first` to `last`. A signal at a close is
+    traded at the next close."""
+    moves, invested, wealth = [], True, value_eur
     for i in range(first, last, rule.review_days):
         if is_winner_at(closes, i):
             continue
@@ -151,12 +157,15 @@ class StockPanel:
 
     def build(self) -> dict:
         s = self.series
-        rule = rule_moves(s.closes, self.scenario, self.first, self.last - 1, self.value0, self.veto)
+        strategy = self.scenario.strategy(s.ticker)
+        rule = rule_moves(s.closes, strategy, self.scenario.context(), self.first, self.last - 1, self.value0, self.veto)
         best = perfect_moves(s.closes, self.first, self.last, self.value0)
         done = executed_moves(self.trades, s.ticker, s.days, self.first)
         lines = {"hold": self.curve([]), "rule": self.curve(rule), "max": self.curve(best), "executed": self.curve(done)}
         return {
             "ticker": s.ticker,
+            "group": self.scenario.plan.group_of(s.ticker) if self.scenario.plan else None,
+            "strategy": strategy.describe(),
             "days": [d.isoformat() for d in s.days[self.first:]],
             "price": [round(c, 4) for c in s.closes[self.first:]],
             **{name: values for name, (values, _) in lines.items()},
