@@ -2,12 +2,26 @@
 {% block title %}Three Way dashboard · kay.apps{% endblock %}
 {% block content %}
 <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
-<div class="subnav"><a href="{{ url_for('three_way') }}">← Three Way</a><a href="{{ url_for('dashboard') }}">Dashboard</a></div>
+<div class="subnav"><a href="{{ url_for('dashboard') }}">← Portaal</a></div>
 <p class="eyebrow">FINANCE · INZICHT</p><h1 class="page-title">Three Way dashboard</h1>
 {% if disabled %}
 <section class="tool-panel"><p>Het dashboard draait alleen lokaal. Op Render is het uitgeschakeld tot er persistente opslag is.</p></section>
 {% else %}
-<div id="dash" data-defaults='{{ defaults|tojson }}' data-source="{{ url_for('three_way_dashboard_data') }}">
+<div id="dash" data-defaults='{{ defaults|tojson }}' data-source="{{ url_for('three_way_dashboard_data') }}" data-api="{{ url_for('api_holdings') }}" data-search="{{ url_for('api_search') }}" data-plan="{{ url_for('api_plan') }}" data-csrf="{{ csrf_token() }}">
+  <section class="tool-panel">
+    <h2>Mijn aandelen</h2>
+    <p>Voeg aandelen toe, pas aantallen aan of haal ze weg. Zoek bij Yahoo op naam, of vul zelf de Yahoo-ticker in (bijvoorbeeld NVDA, ASML.AS, MIH.F).</p>
+    <div class="toolbar"><input id="search-q" type="search" placeholder="Zoek op naam of ticker" maxlength="40"><button class="secondary-button" id="search-go" type="button">Zoek</button><span class="helper" id="search-status"></span></div>
+    <div class="results" id="search-results"></div>
+    <div class="toolbar add-row">
+      <label>Ticker <input id="add-ticker" maxlength="15" placeholder="NVDA"></label>
+      <label>Aantal <input id="add-qty" type="number" min="0" step="any"></label>
+      <label>Kosten totaal (EUR) <input id="add-cost" type="number" min="0" step="any" placeholder="optioneel"></label>
+      <button class="primary-button" id="add-go" type="button">Toevoegen</button>
+    </div>
+    <p class="helper" id="holdings-status"></p>
+    <div id="holdings"></div>
+  </section>
   <section class="tool-panel">
     <h2>Wat als?</h2>
     <p>Regel A is je huidige instelling. Zet regel B aan om twee regels naast elkaar te zien. Nieuws en intuïtie kun je uitzetten of op een vaste waarde zetten.</p>
@@ -16,7 +30,15 @@
       <fieldset data-scenario="a"><legend>Regel A</legend><div class="fields"></div></fieldset>
       <fieldset data-scenario="b" class="off"><legend><label><input type="checkbox" id="b-on"> Regel B</label></legend><div class="fields"></div></fieldset>
     </div>
+    <div class="group-panel" id="group-panel">
+      <h3>Regel A per groep</h3>
+      <p class="helper">Elke groep volgt zijn eigen regel. Piek en daling volgt de trend (rollend gemiddelde), de andere twee gebruiken de tegendraadse regel met eigen grenzen. Aandelen zonder groep volgen de losse velden van regel A.</p>
+      <div class="scenario-grid" id="group-fields"></div>
+      <div class="assign" id="group-assign"></div>
+      <div class="toolbar"><button class="secondary-button" id="plan-save" type="button">Groepen en instellingen opslaan</button><span class="helper" id="plan-status"></span></div>
+    </div>
     <div class="toolbar">
+      <label><input type="checkbox" id="groups-on" checked> Regel A per groep</label>
       <label>Periode
         <select id="window"><option value="90">3 maanden</option><option value="180" selected>6 maanden</option><option value="365">1 jaar</option><option value="730">2 jaar</option></select>
       </label>
@@ -42,6 +64,7 @@
     <div class="chart" id="price-chart"></div>
   </section>
 
+  <section class="tool-panel" id="group-results" hidden><h2>Per groep</h2><div id="groups"></div></section>
   <section class="tool-panel"><h2>Verkopen en wat ze opleverden</h2><div id="sales"></div></section>
   <section class="tool-panel"><h2>Per aandeel</h2><div id="stocks"></div></section>
 </div>
