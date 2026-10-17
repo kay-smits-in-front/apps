@@ -190,3 +190,23 @@ def test_route_accepts_a_plan_and_rejects_a_bad_one(client, monkeypatch, data_fi
     assert client.get("/apps/three-way/dashboard/data", query_string={"plan": "{nope"}).status_code == 400
     bad = json.dumps({"groups": {"AAA": "x"}})
     assert client.get("/apps/three-way/dashboard/data", query_string={"plan": bad}).status_code == 400
+
+
+def test_cumulative_rule_sells_when_dear_and_buys_when_cheap():
+    from functioning.rule import CumulativeRule, Signal
+    rule = CumulativeRule(up_pct=30, down_pct=20, review_days=1)
+    base = [100.0] * 60
+    assert rule.trend_outcome(base + [150.0], 60, invested=True).signal is Signal.SELL
+    assert rule.trend_outcome(base + [150.0], 60, invested=False).signal is Signal.NONE
+    assert rule.trend_outcome(base + [70.0], 60, invested=False).signal is Signal.BUY
+    assert rule.trend_outcome(base + [70.0], 60, invested=True).signal is Signal.NONE
+    assert rule.trend_outcome([100.0] * 10, 9, invested=True).signal is Signal.NONE
+
+
+def test_group_can_use_the_cumulative_rule(data_files):
+    from functioning.groups import plan_from_json
+    from functioning.rule import CumulativeRule
+    plan = plan_from_json({"groups": {"AAA": "cumulative"}, "settings": {"cumulative": {"up_pct": 20, "down_pct": 15}}})
+    assert isinstance(plan.strategy_for("AAA"), CumulativeRule)
+    out = run(data_files, Scenario(LIVE, None, None, plan))
+    assert "cumulatief" in out["stocks"][0]["strategy"]

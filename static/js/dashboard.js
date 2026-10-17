@@ -77,7 +77,8 @@
     return out;
   }
   // ---------------------------------------------------------- groups
-  const groupFields = (group) => (group === "peak" ? TREND_FIELDS : RULE_FIELDS);
+  const CUMULATIVE_FIELDS = [["up_pct", "Verkoop boven gemiddelde %"], ["down_pct", "Terugkoop onder gemiddelde %"], ["review_days", "Check elke (dgn)"]];
+  const groupFields = (group) => ({ peak: TREND_FIELDS, cumulative: CUMULATIVE_FIELDS }[group] || RULE_FIELDS);
   function buildGroupFields() {
     el("group-fields").replaceChildren(...Object.keys(plan.labels).map((group) => {
       const box = html("fieldset"); box.dataset.group = group;
