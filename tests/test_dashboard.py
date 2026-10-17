@@ -92,6 +92,9 @@ def client():
             app_module.db.session.add(user)
             app_module.db.session.commit()
         user_id = user.id
+        app_module.db.session.execute(app_module.db.delete(app_module.Position).where(app_module.Position.user_id == user_id))
+        app_module.db.session.execute(app_module.db.delete(app_module.GroupSetting).where(app_module.GroupSetting.user_id == user_id))
+        app_module.db.session.commit()
     test_client = app.test_client()
     with test_client.session_transaction() as session:
         session["_user_id"] = str(user_id)
@@ -112,9 +115,9 @@ def test_data_route_rejects_out_of_range_values(client):
 
 def test_data_route_returns_the_scenario(client, monkeypatch, data_files):
     import functioning.dashboard as module
-    cache, holdings, ledger = data_files
+    cache, fixture_holdings, fixture_ledger = data_files
     original = module.dashboard_data
-    monkeypatch.setattr(module, "dashboard_data", lambda scenario, window: original(scenario, window, cache, holdings, ledger, TODAY))
+    monkeypatch.setattr(module, "dashboard_data", lambda scenario, window, holdings=None, ledger=None: original(scenario, window, cache, fixture_holdings, fixture_ledger, TODAY))
     response = client.get("/apps/three-way/dashboard/data?up_pct=20&down_pct=3&news=off&days=90")
     assert response.status_code == 200
     body = response.get_json()
@@ -182,9 +185,9 @@ def test_each_group_follows_its_own_rule(data_files):
 
 def test_route_accepts_a_plan_and_rejects_a_bad_one(client, monkeypatch, data_files):
     import functioning.dashboard as module
-    cache, holdings, ledger = data_files
+    cache, fixture_holdings, fixture_ledger = data_files
     original = module.dashboard_data
-    monkeypatch.setattr(module, "dashboard_data", lambda scenario, window: original(scenario, window, cache, holdings, ledger, TODAY))
+    monkeypatch.setattr(module, "dashboard_data", lambda scenario, window, holdings=None, ledger=None: original(scenario, window, cache, fixture_holdings, fixture_ledger, TODAY))
     good = json.dumps({"groups": {"AAA": "peak"}, "settings": {"peak": {"ma_days": 10, "band_pct": 2, "review_days": 1}}})
     assert client.get("/apps/three-way/dashboard/data", query_string={"plan": good}).status_code == 200
     assert client.get("/apps/three-way/dashboard/data", query_string={"plan": "{nope"}).status_code == 400
@@ -210,3 +213,90 @@ def test_group_can_use_the_cumulative_rule(data_files):
     assert isinstance(plan.strategy_for("AAA"), CumulativeRule)
     out = run(data_files, Scenario(LIVE, None, None, plan))
     assert "cumulatief" in out["stocks"][0]["strategy"]
+
+
+# ---------------------------------------------------------- my stocks
+
+
+def test_add_change_and_delete_a_stock(client, monkeypatch):
+    monkeypatch.setattr(app_module, "verify_ticker", lambda ticker: ticker != "NOPE")
+    url = "/apps/three-way/api/holdings"
+    assert client.get(url).get_json()["holdings"] == []
+    added = client.post(url, json={"ticker": "nvda", "quantity": 3, "cost_eur": 450})
+    assert added.status_code == 200 and added.get_json()["ticker"] == "NVDA"
+    client.post(url, json={"ticker": "NVDA", "quantity": 5, "cost_eur": 450})
+    holdings = client.get(url).get_json()["holdings"]
+    assert [(h["ticker"], h["quantity"]) for h in holdings] == [("NVDA", 5.0)]
+    assert client.delete(url + "/NVDA").status_code == 200
+    assert client.delete(url + "/NVDA").status_code == 404
+
+
+def test_add_rejects_bad_input_and_unknown_tickers(client, monkeypatch):
+    monkeypatch.setattr(app_module, "verify_ticker", lambda ticker: ticker != "NOPE")
+    url = "/apps/three-way/api/holdings"
+    assert client.post(url, json={"ticker": "bad ticker!", "quantity": 1}).status_code == 400
+    assert client.post(url, json={"ticker": "AAA", "quantity": -2}).status_code == 400
+    assert client.post(url, json={"ticker": "AAA"}).status_code == 400
+    assert client.post(url, json={"ticker": "NOPE", "quantity": 1}).status_code == 400
+    assert client.get(url).get_json()["holdings"] == []
+
+
+def test_stocks_are_private_per_user(client, monkeypatch):
+    monkeypatch.setattr(app_module, "verify_ticker", lambda ticker: True)
+    client.post("/apps/three-way/api/holdings", json={"ticker": "AAA", "quantity": 1})
+    with app_module.app.app_context():
+        other = app_module.User(email="other-%d@example.com" % os.getpid(), password_hash="x", approved=True)
+        app_module.db.session.add(other)
+        app_module.db.session.commit()
+        other_id = other.id
+    second = app_module.app.test_client()
+    with second.session_transaction() as session:
+        session["_user_id"] = str(other_id)
+        session["_fresh"] = True
+    assert second.get("/apps/three-way/api/holdings").get_json()["holdings"] == []
+
+
+def test_saved_plan_groups_and_settings_come_back(client, monkeypatch):
+    monkeypatch.setattr(app_module, "verify_ticker", lambda ticker: True)
+    client.post("/apps/three-way/api/holdings", json={"ticker": "AAA", "quantity": 1})
+    body = {"groups": {"AAA": "peak"}, "settings": {"peak": {"ma_days": 30, "band_pct": 4, "review_days": 1}}}
+    assert client.post("/apps/three-way/api/plan", json=body).status_code == 200
+    assert client.get("/apps/three-way/api/holdings").get_json()["holdings"][0]["group"] == "peak"
+    with app_module.app.app_context():
+        user = app_module.db.session.scalar(app_module.select(app_module.User).where(app_module.User.email == "dash@example.com"))
+        plan = app_module.user_plan(user)
+    assert plan.groups == {"AAA": "peak"} and plan.settings["peak"]["ma_days"] == 30
+    assert client.post("/apps/three-way/api/plan", json={"groups": {"AAA": "x"}}).status_code == 400
+
+
+def test_search_uses_yahoo_and_reports_failure(client, monkeypatch):
+    monkeypatch.setattr(app_module, "yahoo_search", lambda q: [{"symbol": "NVDA", "name": "NVIDIA", "exchange": "NASDAQ", "type": "EQUITY"}])
+    assert client.get("/apps/three-way/api/search?q=nvidia").get_json()["results"][0]["symbol"] == "NVDA"
+    assert client.get("/apps/three-way/api/search?q=n").get_json()["results"] == []
+
+    def broken(q):
+        raise RuntimeError("down")
+    monkeypatch.setattr(app_module, "yahoo_search", broken)
+    assert client.get("/apps/three-way/api/search?q=nvidia").status_code == 502
+
+
+def test_old_first_page_redirects_to_the_dashboard(client):
+    response = client.get("/apps/three-way")
+    assert response.status_code == 302 and response.headers["Location"].endswith("/apps/three-way/dashboard")
+
+
+def test_dashboard_data_uses_the_users_own_stocks(client, monkeypatch, data_files):
+    import functioning.dashboard as module
+    cache, _, _ = data_files
+    monkeypatch.setattr(app_module, "verify_ticker", lambda ticker: True)
+    seen = {}
+    original = module.dashboard_data
+
+    def spy(scenario, window, holdings=None, ledger=None):
+        seen["tickers"] = sorted(holdings.quantities())
+        seen["ledger"] = ledger
+        return original(scenario, window, cache, holdings, ledger, TODAY)
+    monkeypatch.setattr(module, "dashboard_data", spy)
+    client.post("/apps/three-way/api/holdings", json={"ticker": "AAA", "quantity": 2})
+    assert client.get("/apps/three-way/dashboard/data").status_code == 200
+    assert seen["tickers"] == ["AAA"] and seen["ledger"].load() == []

@@ -1,5 +1,6 @@
+import json
 import os
-import subprocess
+import re
 import threading
 import smtplib
 import urllib.parse
@@ -7,6 +8,7 @@ import urllib.request
 from datetime import datetime, timezone
 from email.message import EmailMessage
 from functools import wraps
+from pathlib import Path
 from getpass import getpass
 
 from dotenv import load_dotenv
@@ -87,56 +89,7 @@ login_manager.login_message = "Log eerst in om deze pagina te bekijken."
 # until an isolated, persistent worker is configured. This avoids running portfolio
 # scripts in a short-lived web dyno or exposing personal data to a shared service.
 THREE_WAY_PATH = os.path.abspath(os.getenv("THREE_WAY_PATH", os.path.join(os.path.dirname(__file__), "three-way")))
-THREE_WAY_TIMEOUT = min(max(int(os.getenv("THREE_WAY_TIMEOUT", "180")), 10), 600)
 THREE_WAY_LOCK = threading.Lock()
-THREE_WAY_ACTIONS = {"main": "main.py", "backcasting": "backcasting.py", "walkforward": "walkforward.py"}
-
-
-def run_three_way(action: str, news: str = "0", intuition: str = "0") -> tuple[int, str]:
-    if action not in THREE_WAY_ACTIONS:
-        raise ValueError("Onbekende Three Way-taak.")
-    if IS_PRODUCTION:
-        raise RuntimeError("Three Way-uitvoering is op Render uitgeschakeld totdat een geïsoleerde worker en persistente opslag zijn ingericht.")
-    script = os.path.realpath(os.path.join(THREE_WAY_PATH, THREE_WAY_ACTIONS[action]))
-    root = os.path.realpath(THREE_WAY_PATH)
-    if os.path.commonpath([script, root]) != root or not os.path.isfile(script):
-        raise RuntimeError("Three Way-bestanden niet gevonden. Controleer de map three-way.")
-    holdings_file = os.path.join(root, "data", "holdings.json")
-    if not os.path.isfile(holdings_file):
-        raise RuntimeError("Portefeuille ontbreekt. Maak three-way/data/holdings.json aan op basis van holdings.json; dit bestand wordt niet in Git opgeslagen.")
-    import json
-    try:
-        with open(holdings_file, encoding="utf-8") as handle:
-            holdings_data = json.load(handle)
-        if not holdings_data.get("holdings"):
-            raise RuntimeError("Portefeuille is leeg. Vul three-way/data/holdings.json met je eigen aandelen voordat je een analyse start.")
-    except (OSError, json.JSONDecodeError, AttributeError) as exc:
-        raise RuntimeError("Portefeuillebestand is ongeldig. Controleer three-way/data/holdings.json.") from exc
-    if not THREE_WAY_LOCK.acquire(blocking=False):
-        raise RuntimeError("Er draait al een Three Way-taak. Wacht tot deze klaar is.")
-    try:
-        input_text = f"{news}\n{intuition}\n" if action == "main" else ""
-        completed = subprocess.run(
-            [os.getenv("THREE_WAY_PYTHON", os.sys.executable), script],
-            cwd=root,
-            input=input_text,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            timeout=THREE_WAY_TIMEOUT,
-            check=False,
-            shell=False,
-            env={**os.environ, "PYTHONUNBUFFERED": "1"},
-        )
-        output = completed.stdout[-24000:]
-        return completed.returncode, output or "De taak gaf geen uitvoer."
-    except subprocess.TimeoutExpired as exc:
-        output = exc.stdout or ""
-        if isinstance(output, bytes):
-            output = output.decode("utf-8", errors="replace")
-        return 124, str(output)[-20000:] + "\n\nTaak afgebroken: time-out bereikt."
-    finally:
-        THREE_WAY_LOCK.release()
 
 
 class User(UserMixin, db.Model):
@@ -146,6 +99,31 @@ class User(UserMixin, db.Model):
     approved = db.Column(db.Boolean, nullable=False, default=False)
     is_admin = db.Column(db.Boolean, nullable=False, default=False)
     created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+
+class Position(db.Model):
+    """A stock one user holds, with the group (rule) it follows."""
+    __table_args__ = (db.UniqueConstraint("user_id", "ticker", name="one_position_per_ticker"),)
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+    ticker = db.Column(db.String(20), nullable=False)
+    quantity = db.Column(db.Float, nullable=False)
+    cost_eur = db.Column(db.Float, nullable=False, default=0.0)
+    group = db.Column(db.String(20), nullable=True)
+
+
+class GroupSetting(db.Model):
+    """The settings (JSON) one user chose for one group."""
+    __table_args__ = (db.UniqueConstraint("user_id", "group", name="one_setting_per_group"),)
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
+    group = db.Column(db.String(20), nullable=False)
+    data = db.Column(db.Text, nullable=False)
+
+
+class Seeded(db.Model):
+    """Marks users whose holdings were already taken over from data/holdings.json."""
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), primary_key=True)
 
 
 class LoginForm(FlaskForm):
@@ -325,40 +303,10 @@ def dashboard():
     return render_template("dashboard.html", apps=apps)
 
 
-@app.route("/apps/three-way", methods=["GET", "POST"])
+@app.route("/apps/three-way")
 @login_required
-@limiter.limit("3 per hour", methods=["POST"])
 def three_way():
-    if not current_user.approved:
-        abort(403)
-    output = None
-    exit_code = None
-    selected_action = "backcasting"
-    news = "0"
-    intuition = "0"
-    if request.method == "POST":
-        selected_action = request.form.get("action", "")
-        news = request.form.get("news", "0").strip().replace(",", ".")
-        intuition = request.form.get("intuition", "0").strip().replace(",", ".")
-        if selected_action not in THREE_WAY_ACTIONS:
-            abort(400)
-        if selected_action == "main":
-            try:
-                if not -5 <= float(news) <= 5 or not -5 <= float(intuition) <= 5:
-                    raise ValueError
-            except ValueError:
-                flash("Nieuws en intuïtie moeten tussen -5 en +5 liggen.", "error")
-                return render_template("three_way.html", output=None, exit_code=None, selected_action=selected_action, news=news, intuition=intuition)
-            if request.form.get("confirm_main") != "yes":
-                flash("Bevestig eerst dat main.py een check opslaat in de Three Way-data.", "error")
-                return render_template("three_way.html", output=None, exit_code=None, selected_action=selected_action, news=news, intuition=intuition)
-        try:
-            exit_code, output = run_three_way(selected_action, news, intuition)
-        except (RuntimeError, ValueError) as exc:
-            output = str(exc)
-            exit_code = 1
-        app.logger.info("Three Way-taak %s eindigde met code %s", selected_action, exit_code)
-    return render_template("three_way.html", output=output, exit_code=exit_code, selected_action=selected_action, news=news, intuition=intuition)
+    return redirect(url_for("three_way_dashboard"))
 
 
 RULE_FIELDS = {
@@ -382,7 +330,7 @@ def read_score(raw):
     return read_number(raw, -5, 5, float)
 
 
-def scenario_from_args(args, defaults):
+def scenario_from_args(args, defaults, saved_plan=None):
     """The scenario of the request. Missing fields keep the default setting."""
     from functioning.dashboard import Scenario
     from functioning.rule import Rule
@@ -392,7 +340,7 @@ def scenario_from_args(args, defaults):
             values[field] = read_number(args[field], low, high, kind)
     news = read_score(args["news"]) if "news" in args else defaults.news
     intuition = read_score(args["intuition"]) if "intuition" in args else defaults.intuition
-    return Scenario(Rule(**values), news, intuition, plan_from_args(args))
+    return Scenario(Rule(**values), news, intuition, plan_from_args(args) or saved_plan)
 
 
 def plan_from_args(args):
@@ -417,41 +365,193 @@ def three_way_import():
         sys.path.insert(0, THREE_WAY_PATH)
 
 
+MAX_POSITIONS = 60
+TICKER_PATTERN = re.compile(r"^[A-Z0-9][A-Z0-9.\-=^]{0,14}$")
+
+
+class UserHoldings:
+    """The holdings of one user, in the shape the Three Way code expects."""
+
+    def __init__(self, quantities):
+        self._quantities = quantities
+
+    def quantities(self):
+        return dict(self._quantities)
+
+
+def approved_user():
+    if not current_user.approved:
+        abort(403)
+    return current_user
+
+
+def import_holdings_file(user):
+    """First visit of the admin: take over data/holdings.json, with the starting groups."""
+    if not user.is_admin or db.session.get(Seeded, user.id):
+        return
+    db.session.add(Seeded(user_id=user.id))
+    three_way_import()
+    from functioning.constants import DEFAULT_GROUPS
+    from functioning.market import Holdings
+    for entry in Holdings().entries():
+        db.session.add(Position(user_id=user.id, ticker=entry["ticker"], quantity=float(entry["quantity"]),
+                                cost_eur=float(entry.get("cost_eur", 0)), group=DEFAULT_GROUPS.get(entry["ticker"])))
+    db.session.commit()
+
+
+def user_positions(user):
+    import_holdings_file(user)
+    return db.session.scalars(select(Position).where(Position.user_id == user.id).order_by(Position.ticker)).all()
+
+
+def user_plan(user):
+    """Groups of the user's stocks plus the settings the user saved (defaults otherwise)."""
+    from functioning.groups import plan_from_json
+    saved = {row.group: json.loads(row.data)
+             for row in db.session.scalars(select(GroupSetting).where(GroupSetting.user_id == user.id))}
+    groups = {p.ticker: p.group for p in user_positions(user) if p.group}
+    return plan_from_json({"groups": groups, "settings": saved})
+
+
+def position_json(position):
+    return {"ticker": position.ticker, "quantity": position.quantity, "cost_eur": position.cost_eur, "group": position.group}
+
+
+def verify_ticker(ticker):
+    """True if Yahoo has prices for the ticker. Fetches (and caches) the history."""
+    three_way_import()
+    from functioning.prices import PriceCache
+    series, _ = PriceCache().series([ticker])
+    return bool(series)
+
+
+def yahoo_search(query):
+    import yfinance
+    quotes = yfinance.Search(query, max_results=8).quotes
+    return [{"symbol": q.get("symbol", ""), "name": q.get("longname") or q.get("shortname") or "",
+             "exchange": q.get("exchDisp", ""), "type": q.get("quoteType", "")} for q in quotes if q.get("symbol")]
+
+
+def read_position_payload(body):
+    ticker = str(body.get("ticker", "")).strip().upper()
+    if not TICKER_PATTERN.match(ticker):
+        raise ValueError("Ongeldige ticker.")
+    quantity = read_number(body.get("quantity"), 1e-9, 1e9, float)
+    cost = read_number(body.get("cost_eur", 0) or 0, 0, 1e9, float)
+    return ticker, quantity, cost
+
+
 @app.route("/apps/three-way/dashboard")
 @login_required
 def three_way_dashboard():
-    if not current_user.approved:
-        abort(403)
-    defaults = None
-    if not IS_PRODUCTION:
-        three_way_import()
-        from functioning.dashboard import default_scenario
-        scenario = default_scenario()
-        from functioning.constants import GROUP_LABELS
-        from functioning.groups import default_plan
-        plan = default_plan()
-        defaults = {**vars(scenario.rule), "news": scenario.news, "intuition": scenario.intuition,
-                    "plan": {"groups": plan.groups, "settings": plan.settings, "labels": GROUP_LABELS}}
-    return render_template("three_way_dashboard.html", defaults=defaults, disabled=IS_PRODUCTION)
+    user = approved_user()
+    if IS_PRODUCTION:
+        return render_template("three_way_dashboard.html", defaults=None, disabled=True)
+    three_way_import()
+    from functioning.constants import GROUP_LABELS
+    scenario = scenario_defaults(user)
+    plan = user_plan(user)
+    defaults = {**vars(scenario.rule), "news": scenario.news, "intuition": scenario.intuition,
+                "plan": {"groups": plan.groups, "settings": plan.settings, "labels": GROUP_LABELS}}
+    return render_template("three_way_dashboard.html", defaults=defaults, disabled=False)
+
+
+def scenario_defaults(user):
+    """Admin: the saved rule and latest scores. Others: the live start rule, no scores."""
+    from functioning.dashboard import Scenario, default_scenario
+    from functioning.rule import LIVE
+    return default_scenario() if user.is_admin else Scenario(LIVE)
 
 
 @app.route("/apps/three-way/dashboard/data")
 @login_required
 @limiter.limit("1200 per hour", override_defaults=True)
 def three_way_dashboard_data():
-    if not current_user.approved:
-        abort(403)
+    user = approved_user()
     if IS_PRODUCTION:
         return {"error": "Het dashboard is op Render uitgeschakeld totdat persistente opslag is ingericht."}, 503
     three_way_import()
-    from functioning.dashboard import dashboard_data, default_scenario
+    from functioning.dashboard import dashboard_data
+    from functioning.storage import Ledger
     try:
-        scenario = scenario_from_args(request.args, default_scenario())
+        scenario = scenario_from_args(request.args, scenario_defaults(user), user_plan(user))
         window = int(read_number(request.args.get("days", "180"), 30, 1825, float))
     except (ValueError, TypeError, AttributeError):
         return {"error": "Ongeldige instelling."}, 400
+    holdings = UserHoldings({p.ticker: p.quantity for p in user_positions(user)})
+    ledger = Ledger() if user.is_admin else Ledger(Path(app.instance_path) / "no-trades.json")
     with THREE_WAY_LOCK:
-        return dashboard_data(scenario, window)
+        return dashboard_data(scenario, window, holdings=holdings, ledger=ledger)
+
+
+@app.route("/apps/three-way/api/holdings", methods=["GET", "POST"])
+@login_required
+def api_holdings():
+    user = approved_user()
+    if request.method == "GET":
+        return {"holdings": [position_json(p) for p in user_positions(user)]}
+    try:
+        ticker, quantity, cost = read_position_payload(request.get_json(silent=True) or {})
+    except (ValueError, TypeError):
+        return {"error": "Controleer ticker, aantal en kosten."}, 400
+    position = db.session.scalar(select(Position).where(Position.user_id == user.id, Position.ticker == ticker))
+    if position is None:
+        if len(user_positions(user)) >= MAX_POSITIONS:
+            return {"error": f"Maximaal {MAX_POSITIONS} aandelen."}, 400
+        if not verify_ticker(ticker):
+            return {"error": f"Geen koersdata gevonden voor {ticker} op Yahoo. Controleer de ticker."}, 400
+        position = Position(user_id=user.id, ticker=ticker, quantity=quantity, cost_eur=cost)
+        db.session.add(position)
+    position.quantity, position.cost_eur = quantity, cost
+    db.session.commit()
+    return position_json(position)
+
+
+@app.route("/apps/three-way/api/holdings/<ticker>", methods=["DELETE"])
+@login_required
+def api_holdings_delete(ticker):
+    user = approved_user()
+    position = db.session.scalar(select(Position).where(Position.user_id == user.id, Position.ticker == ticker.upper()))
+    if position is None:
+        abort(404)
+    db.session.delete(position)
+    db.session.commit()
+    return {"deleted": position.ticker}
+
+
+@app.route("/apps/three-way/api/plan", methods=["POST"])
+@login_required
+def api_plan():
+    """Save the group of each stock and the settings of each group for this user."""
+    user = approved_user()
+    three_way_import()
+    from functioning.groups import plan_from_json
+    try:
+        plan = plan_from_json(request.get_json(silent=True) or {})
+    except (ValueError, TypeError, AttributeError):
+        return {"error": "Ongeldige instellingen."}, 400
+    for position in user_positions(user):
+        position.group = plan.groups.get(position.ticker)
+    db.session.execute(db.delete(GroupSetting).where(GroupSetting.user_id == user.id))
+    for group, setting in plan.settings.items():
+        db.session.add(GroupSetting(user_id=user.id, group=group, data=json.dumps(setting)))
+    db.session.commit()
+    return {"saved": True}
+
+
+@app.route("/apps/three-way/api/search")
+@login_required
+@limiter.limit("120 per hour", override_defaults=True)
+def api_search():
+    approved_user()
+    query = request.args.get("q", "").strip()
+    if len(query) < 2 or len(query) > 40:
+        return {"results": []}
+    try:
+        return {"results": yahoo_search(query)}
+    except Exception:
+        app.logger.warning("Yahoo-zoekopdracht mislukt.")
+        return {"error": "Zoeken bij Yahoo is nu niet beschikbaar. Vul de ticker zelf in."}, 502
 
 
 @app.route("/apps/thinkwave")
