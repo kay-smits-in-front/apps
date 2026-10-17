@@ -46,3 +46,6 @@ table.data th{color:var(--muted);font-weight:500}
 .result:hover{border-color:var(--accent2)}
 table.data input{width:90px;background:#0c1018;border:1px solid #2b3241;border-radius:6px;padding:5px;color:var(--text);text-align:right}
 table.data button{background:none;border:1px solid var(--line);border-radius:8px;color:#c7cedc;padding:5px 9px;font-size:11px;cursor:pointer}
+.check{display:flex;gap:8px;align-items:center;margin-top:10px;font-size:12px;color:#c6ccda}
+.flag{display:inline-block;margin:0 4px 2px 0;padding:2px 8px;border:1px solid var(--accent2);border-radius:10px;font-size:11px;color:#c9d0ff}
+.hot{color:var(--accent)}.cold{color:#ffb6bf}

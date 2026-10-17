@@ -61,10 +61,16 @@
     <h2>Koersen vergelijken</h2>
     <p>Alle koersen starten op 100. Klik een aandeel aan of uit.</p>
     <div class="chips" id="chips"></div>
+    <label class="check"><input type="checkbox" id="spikes-on" checked> Volumepieken tonen (stip = dag met minstens 2x het normale volume)</label>
     <div class="chart" id="price-chart"></div>
   </section>
 
   <section class="tool-panel" id="group-results" hidden><h2>Per groep</h2><div id="groups"></div></section>
+  <section class="tool-panel">
+    <h2>Daghandel</h2>
+    <p>Zo ziet een daghandelaar de laatste handelsdag. Een volumepiek (veel meer handel dan normaal) laat zien waar grote spelers actief zijn. Een gap is de afstand tussen de slotkoers van gisteren en de opening van vandaag.</p>
+    <div id="daytrade"></div>
+  </section>
   <section class="tool-panel"><h2>Verkopen en wat ze opleverden</h2><div id="sales"></div></section>
   <section class="tool-panel"><h2>Per aandeel</h2><div id="stocks"></div></section>
 </div>

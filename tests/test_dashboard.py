@@ -32,7 +32,11 @@ def data_files(tmp_path):
         for _ in days:
             price *= 1 + rng.gauss(0.0005, 0.03)
             closes.append(price)
-        cache[ticker] = {"fetched": TODAY.isoformat(), "fx": 0.9, "days": [x.isoformat() for x in days], "closes": closes}
+        cache[ticker] = {
+            "fetched": TODAY.isoformat(), "fx": 0.9, "days": [x.isoformat() for x in days], "closes": closes,
+            "volumes": [1000.0 * (1 + rng.random() * (6 if k % 37 == 0 else 0.5)) for k in range(len(days))],
+            "opens": [c * 0.995 for c in closes], "highs": [c * 1.02 for c in closes], "lows": [c * 0.98 for c in closes],
+        }
     (tmp_path / "prices.json").write_text(json.dumps(cache))
     (tmp_path / "holdings.json").write_text(json.dumps({"holdings": [
         {"ticker": "AAA", "quantity": 10, "cost_eur": 900}, {"ticker": "BBB", "quantity": 5, "cost_eur": 400}]}))
@@ -300,3 +304,58 @@ def test_dashboard_data_uses_the_users_own_stocks(client, monkeypatch, data_file
     client.post("/apps/three-way/api/holdings", json={"ticker": "AAA", "quantity": 2})
     assert client.get("/apps/three-way/dashboard/data").status_code == 200
     assert seen["tickers"] == ["AAA"] and seen["ledger"].load() == []
+
+
+# ----------------------------------------------------------- day trading
+
+
+def test_day_metrics():
+    from functioning import daytrade as d
+    volumes = [100.0] * 20 + [350.0]
+    assert d.relative_volume(volumes, 20) == pytest.approx(3.5)
+    assert d.relative_volume(volumes, 5) is None
+    assert d.gap_pct([0, 103.0], [100.0, 104.0], 1) == pytest.approx(3.0)
+    assert d.range_pct([0, 110.0], [0, 90.0], [0, 100.0], 1) == pytest.approx(20.0)
+    assert d.rsi([float(i) for i in range(30)], 29) == 100.0
+    assert d.rsi([float(30 - i) for i in range(30)], 29) == pytest.approx(0.0)
+    assert d.rsi([1.0] * 5, 4) is None
+
+
+def test_volume_rule_follows_the_money():
+    from functioning.daytrade import VolumeRule
+    from functioning.rule import Signal
+    volumes = tuple([100.0] * 25 + [400.0])
+    rule = VolumeRule(spike_x=2.0, min_move_pct=2.0, review_days=1, volumes=volumes)
+    down = [100.0] * 25 + [95.0]
+    up = [100.0] * 25 + [105.0]
+    assert rule.trend_outcome(down, 25, invested=True).signal is Signal.SELL
+    assert rule.trend_outcome(down, 25, invested=False).signal is Signal.NONE
+    assert rule.trend_outcome(up, 25, invested=False).signal is Signal.BUY
+    assert rule.trend_outcome(up, 25, invested=True).signal is Signal.NONE
+    small = [100.0] * 25 + [100.5]
+    assert rule.trend_outcome(small, 25, invested=False).signal is Signal.NONE
+    assert VolumeRule(2.0, 2.0, 1).trend_outcome(up, 25, invested=False).signal is Signal.NONE
+
+
+def test_panel_has_last_day_numbers_and_spikes(data_files):
+    out = run(data_files, Scenario(LIVE))
+    panel = out["stocks"][0]["daytrade"]
+    assert panel["last"]["day"] == TODAY.isoformat() or panel["last"]["day"] < TODAY.isoformat()
+    assert set(panel["last"]) >= {"rel_volume", "gap_pct", "range_pct", "atr_pct", "rsi", "flags"}
+    assert panel["last"]["range_pct"] == pytest.approx(4.0, abs=0.01)  # 2% above and 2% under the close
+    assert panel["spikes"], "the fixture has volume spikes"
+
+
+def test_a_group_can_follow_the_volume_rule(data_files):
+    from functioning.daytrade import VolumeRule
+    from functioning.groups import plan_from_json
+    plan = plan_from_json({"groups": {"AAA": "volume"}})
+    out = run(data_files, Scenario(LIVE, None, None, plan))
+    assert "volume" in out["stocks"][0]["strategy"]
+    assert isinstance(plan.strategy_for("AAA", None), VolumeRule)
+
+
+def test_stale_cache_without_volumes_is_refetched():
+    from functioning.prices import PriceCache
+    assert not PriceCache.is_fresh({"fetched": TODAY.isoformat(), "closes": []}, TODAY)
+    assert PriceCache.is_fresh({"fetched": TODAY.isoformat(), "volumes": []}, TODAY)

@@ -160,7 +160,8 @@
 
   // ---------------------------------------------------------- groups
   const CUMULATIVE_FIELDS = [["up_pct", "Verkoop boven gemiddelde %"], ["down_pct", "Terugkoop onder gemiddelde %"], ["review_days", "Check elke (dgn)"]];
-  const groupFields = (group) => ({ peak: TREND_FIELDS, cumulative: CUMULATIVE_FIELDS }[group] || RULE_FIELDS);
+  const VOLUME_FIELDS = [["spike_x", "Volumepiek (x normaal)"], ["min_move_pct", "Minimale dagbeweging %"], ["review_days", "Check elke (dgn)"]];
+  const groupFields = (group) => ({ peak: TREND_FIELDS, cumulative: CUMULATIVE_FIELDS, volume: VOLUME_FIELDS }[group] || RULE_FIELDS);
   function buildGroupFields() {
     el("group-fields").replaceChildren(...Object.keys(plan.labels).map((group) => {
       const box = html("fieldset"); box.dataset.group = group;
@@ -218,6 +219,11 @@
   // ----------------------------------------------------------- chart
   function marker(mk, x, y) {
     const cx = x, cy = y, r = 5;
+    if (mk.shape === "dot") {
+      const dot = svg("circle", { cx, cy, r: 3.5, fill: mk.color, stroke: "#0b0e14", "stroke-width": 1 });
+      const text = svg("title"); text.textContent = mk.title; dot.append(text);
+      return dot;
+    }
     const points = mk.shape === "diamond"
       ? `${cx},${cy - r - 1} ${cx + r + 1},${cy} ${cx},${cy + r + 1} ${cx - r - 1},${cy}`
       : mk.action === "sell"
@@ -340,13 +346,22 @@
       return chip;
     }));
   }
+  function spikeMarkers(a, lines) {
+    if (!el("spikes-on").checked) return [];
+    const shown = new Map(lines.map((l) => [l.name, l]));
+    return a.stocks.filter((s) => shown.has(s.ticker)).flatMap((s) => s.daytrade.spikes.map((sp) => {
+      const i = a.days.indexOf(sp.day);
+      return { day: sp.day, shape: "dot", color: shown.get(s.ticker).color, value: i < 0 ? NaN : shown.get(s.ticker).values[i],
+        title: `${s.ticker} ${sp.day}: ${sp.rel}x volume, ${sp.change >= 0 ? "+" : ""}${sp.change}%` };
+    }));
+  }
   function renderPrices(a) {
     const n = a.stocks.length;
     const lines = a.stocks
       .map((s, i) => ({ name: s.ticker, color: colorFor(i, n), values: s.price.map((p) => (p / s.price[0]) * 100), width: 1.8 }))
       .filter((l) => state.picked.has(l.name));
     if (!lines.length) { el("price-chart").replaceChildren(html("p", "helper", "Kies een of meer aandelen.")); return; }
-    lineChart(el("price-chart"), a.days, lines, [], { height: 300, format: (v) => v.toFixed(0) });
+    lineChart(el("price-chart"), a.days, lines, spikeMarkers(a, lines), { height: 300, format: (v) => v.toFixed(0) });
   }
   function table(headers, rows) {
     const t = html("table", "data");
@@ -377,6 +392,18 @@
     el("stocks").replaceChildren(table(["Aandeel", "Hold nu", "Regel A t.o.v. hold", "Transacties / kosten A",
       "Uitgevoerd t.o.v. hold", "Maximum t.o.v. hold"], rows));
   }
+  const cell = (value, suffix, cls) => html("td", cls || "", value === null || value === undefined ? "-" : `${value}${suffix}`);
+  function renderDaytrade(a) {
+    const rows = a.stocks.filter((s) => s.daytrade.last).map((s) => {
+      const d = s.daytrade.last;
+      const flags = html("td");
+      d.flags.forEach((f) => flags.append(html("span", "flag", f)));
+      return [s.ticker, d.day, cell(d.rel_volume, "x", d.rel_volume >= 2 ? "hot" : ""), cell(d.gap_pct, "%", d.gap_pct > 0 ? "hot" : d.gap_pct < 0 ? "cold" : ""),
+        cell(d.range_pct, "%"), cell(d.atr_pct, "%"), cell(d.rsi, "", d.rsi >= 70 ? "cold" : d.rsi <= 30 ? "hot" : ""), flags];
+    });
+    el("daytrade").replaceChildren(rows.length ? table(["Aandeel", "Laatste dag", "Volume vs normaal", "Gap", "Dagrange", "Gem. range 14d", "RSI 14", "Opvallend"], rows)
+      : html("p", "helper", "Nog geen volumegegevens. Klik op Bereken om de koersen opnieuw op te halen."));
+  }
   function renderGroups(a) {
     const usingGroups = el("groups-on").checked;
     el("group-results").hidden = !usingGroups;
@@ -395,7 +422,7 @@
     const a = state.data;
     if (!state.picked.size) a.stocks.slice(0, 5).forEach((s) => state.picked.add(s.ticker));
     renderTiles(a, state.dataB); renderValue(a, state.dataB);
-    renderChips(a); renderPrices(a); renderSales(a); renderStocks(a); renderGroups(a);
+    renderChips(a); renderPrices(a); renderSales(a); renderStocks(a); renderGroups(a); renderDaytrade(a);
     buildAssignment(a.stocks.map((s) => s.ticker));
     if (a.failed.length) el("status").textContent = "Geen koersen voor: " + a.failed.join(", ");
   }
@@ -442,6 +469,7 @@
   el("groups-on").addEventListener("change", () => { el("group-panel").hidden = !el("groups-on").checked; });
   el("b-on").addEventListener("change", toggleB);
   el("run").addEventListener("click", run);
+  el("spikes-on").addEventListener("change", () => { if (state.data) renderPrices(state.data); });
   el("max-on").addEventListener("change", () => { if (state.data) render(); });
   run();
 })();
