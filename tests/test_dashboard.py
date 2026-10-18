@@ -13,7 +13,7 @@ sys.path.insert(0, app_module.THREE_WAY_PATH)
 from functioning.dashboard import Scenario, dashboard_data  # noqa: E402
 from functioning.market import Holdings  # noqa: E402
 from functioning.prices import PriceCache  # noqa: E402
-from functioning.rule import LIVE, Rule  # noqa: E402
+from functioning.rule import HOLD, LIVE, Rule  # noqa: E402
 from functioning.storage import Ledger, Trade  # noqa: E402
 
 TODAY = date(2026, 10, 15)
@@ -473,3 +473,29 @@ def test_panel_carries_why_and_timing(data_files):
     stock = out["stocks"][0]
     assert stock["why"]["factors"][0]["name"] == "Regel"
     assert set(stock["timing"]) == {"peaks", "troughs", "sell", "buy"}
+
+
+def test_window_edges_are_separate_and_end_on_the_last_day():
+    from functioning.research import window_edges
+    edges = window_edges(300, size=42, start=63)
+    assert edges[-1][1] == 299 and all(b - a == 42 for a, b in edges)
+    assert all(edges[k][1] == edges[k + 1][0] for k in range(len(edges) - 1))
+    assert window_edges(50) == []
+
+
+def test_research_compares_rule_with_hold_per_period(data_files):
+    from functioning.research import research_data
+    cache, _, _ = data_files
+    series, _ = cache.series(["AAA", "BBB"], TODAY)
+    out = research_data(series, Scenario(LIVE, None, None), {"AAA": 10, "BBB": 5})
+    assert out["total"]["windows"] == len(out["periods"]) > 10
+    assert {s["ticker"] for s in out["stocks"]} == {"AAA", "BBB"}
+    assert 0 <= out["total"]["wins"] <= out["total"]["windows"]
+    hold = Scenario(HOLD, None, None)
+    flat = research_data(series, hold, {"AAA": 10, "BBB": 5})
+    assert all(p["rule"] == p["hold"] for p in flat["periods"]) and flat["total"]["trades"] == 0
+
+
+def test_research_route_needs_login_and_rejects_bad_input(client):
+    assert app_module.app.test_client().get("/apps/three-way/dashboard/research").status_code == 302
+    assert client.get("/apps/three-way/dashboard/research?up_pct=9999").status_code == 400

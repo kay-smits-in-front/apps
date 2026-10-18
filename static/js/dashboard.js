@@ -3,6 +3,7 @@
   if (!root) return;
   const defaults = JSON.parse(root.dataset.defaults);
   const source = root.dataset.source;
+  const research = root.dataset.research;
   const NS = "http://www.w3.org/2000/svg";
   const COLORS = { hold: "#929bad", a: "#7c8cff", b: "#e58cff", max: "#b5f36d", executed: "#ffb454" };
   const RULE_FIELDS = [
@@ -460,6 +461,26 @@
     const rows = a.stocks.map((s) => [s.ticker, `${s.timing.peaks} pieken, ${s.timing.troughs} dalen`, ...timingCells(s.timing.sell), ...timingCells(s.timing.buy)]);
     el("timing").replaceChildren(table(["Aandeel", "Draaipunten", "Verkopen op tijd", "Vertraging (dgn)", "Koers t.o.v. piek", "Kopen op tijd", "Vertraging (dgn)", "Koers t.o.v. dal"], rows));
   }
+  async function loadResearch() {
+    el("research-status").textContent = "Perioden doorrekenen ...";
+    try {
+      const response = await fetch(`${research}?${query("a")}`, { credentials: "same-origin" });
+      if (!(response.headers.get("content-type") || "").includes("json")) throw new Error("Geen data (status " + response.status + ").");
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.error || "Fout");
+      renderResearch(body);
+    } catch (error) {
+      el("research-status").textContent = error.message;
+    }
+  }
+  const summaryCells = (r) => [`${r.wins}/${r.windows}`, `${r.mean > 0 ? "+" : ""}${r.mean} pp`, `${r.worst} pp`, String(r.trades)];
+  function renderResearch(r) {
+    el("research-status").textContent = r.total.windows ? "" : "Te weinig geschiedenis voor perioden.";
+    const head = ["", "Perioden gewonnen", "Gemiddeld verschil", "Slechtste periode", "Transacties"];
+    el("research-total").replaceChildren(table(head, [["Portefeuille", ...summaryCells(r.total)]]));
+    const rows = r.stocks.map((s) => [s.ticker, ...summaryCells(s)]);
+    el("research-stocks").replaceChildren(table(["Aandeel", ...head.slice(1)], rows));
+  }
   function renderGroups(a) {
     const usingGroups = el("groups-on").checked;
     el("group-results").hidden = !usingGroups;
@@ -478,7 +499,7 @@
     const a = state.data;
     if (!state.picked.size) a.stocks.slice(0, 5).forEach((s) => state.picked.add(s.ticker));
     renderTiles(a, state.dataB); renderValue(a, state.dataB);
-    renderChips(a); renderPrices(a); renderSales(a); renderStocks(a); renderGroups(a); renderDaytrade(a); renderWhy(a); renderTiming(a);
+    renderChips(a); renderPrices(a); renderSales(a); renderStocks(a); renderGroups(a); renderDaytrade(a); renderWhy(a); renderTiming(a); loadResearch();
     if (!state.playersLoaded) { state.playersLoaded = true; loadPlayers(a); }
     buildAssignment(a.stocks.map((s) => s.ticker));
     if (a.failed.length) el("status").textContent = "Geen koersen voor: " + a.failed.join(", ");

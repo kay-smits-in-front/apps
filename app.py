@@ -497,6 +497,26 @@ def three_way_dashboard_data():
         return dashboard_data(scenario, window, holdings=holdings, ledger=ledger)
 
 
+@app.route("/apps/three-way/dashboard/research")
+@login_required
+@limiter.limit("1200 per hour", override_defaults=True)
+def three_way_dashboard_research():
+    user = approved_user()
+    if IS_PRODUCTION:
+        return {"error": "Het dashboard is op Render uitgeschakeld totdat persistente opslag is ingericht."}, 503
+    three_way_import()
+    from functioning.prices import PriceCache
+    from functioning.research import research_data
+    try:
+        scenario = scenario_from_args(request.args, scenario_defaults(user), user_plan(user))
+    except (ValueError, TypeError, AttributeError):
+        return {"error": "Ongeldige instelling."}, 400
+    quantities = {p.ticker: p.quantity for p in user_positions(user)}
+    with THREE_WAY_LOCK:
+        series, failed = PriceCache().series(list(quantities))
+        return research_data(series, scenario, quantities) | {"failed": failed}
+
+
 @app.route("/apps/three-way/api/holdings", methods=["GET", "POST"])
 @login_required
 def api_holdings():
