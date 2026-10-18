@@ -359,3 +359,73 @@ def test_stale_cache_without_volumes_is_refetched():
     from functioning.prices import PriceCache
     assert not PriceCache.is_fresh({"fetched": TODAY.isoformat(), "closes": []}, TODAY)
     assert PriceCache.is_fresh({"fetched": TODAY.isoformat(), "volumes": []}, TODAY)
+
+
+# ------------------------------------------------------------- players
+
+
+def players_frames():
+    import pandas as pd
+    holders = pd.DataFrame({"Holder": ["Vanguard", "BlackRock", "Small Fund", "Tiny"], "pctHeld": [0.09, 0.08, 0.01, 0.002],
+                            "pctChange": [0.02, -0.01, 0.0, 0.0]})
+    transactions = pd.DataFrame({
+        "Start Date": pd.to_datetime(["2026-09-20", "2026-09-01", "2026-08-01", "2025-01-01", "2026-09-10"]),
+        "Text": ["Purchase at price 10 per share", "Sale at price 12 per share", "Stock Gift", "Purchase at price 5", "Stock Award(Grant)"],
+        "Value": [50000.0, 20000.0, 9000.0, 99999.0, 7000.0],
+    })
+    return holders, transactions
+
+
+def test_ownership_turns_fractions_into_percent():
+    from functioning.players import ownership
+    own = ownership({"heldPercentInstitutions": 0.62, "shortPercentOfFloat": 0.18, "recommendationMean": 2.0,
+                     "numberOfAnalystOpinions": 12, "targetMeanPrice": 120, "currentPrice": 100, "shortRatio": "Infinity"})
+    assert own["institutions_pct"] == 62.0 and own["short_pct_float"] == 18.0 and own["target_upside_pct"] == 20.0
+    assert own["insiders_pct"] is None and own["short_ratio"] is None and own["analysts"] == 12
+
+
+def test_top_holders_sorted_and_limited():
+    from functioning.players import top_holders
+    holders, _ = players_frames()
+    top = top_holders(holders)
+    assert [h["holder"] for h in top] == ["Vanguard", "BlackRock", "Small Fund"]
+    assert top[0]["pct"] == 9.0 and top[1]["change_pct"] == -1.0
+    assert top_holders(None) == []
+
+
+def test_insider_activity_counts_only_real_trades_inside_the_window():
+    from functioning.players import insider_activity
+    _, transactions = players_frames()
+    result = insider_activity(transactions, date(2026, 10, 17))
+    assert result == {"buys": 1, "sells": 1, "net_value": 30000.0}
+    assert insider_activity(None, date(2026, 10, 17))["buys"] == 0
+
+
+def test_labels_for_what_stands_out():
+    from functioning.players import labels
+    own = {"short_pct_float": 20.0, "institutions_pct": 80.0, "consensus_mean": 1.8, "analysts": 10}
+    found = labels(own, {"net_value": 100.0})
+    assert found == ["veel short", "veel institutioneel", "analisten: kopen", "insiders kopen"]
+    assert labels({"short_pct_float": None, "institutions_pct": None, "consensus_mean": 3.0, "analysts": 1}, {"net_value": 0.0}) == []
+
+
+def test_players_cache_only_fetches_stale_tickers(tmp_path):
+    from functioning.players import PlayersCache
+    calls = []
+
+    def fake(ticker, today):
+        calls.append(ticker)
+        return {"fetched": today.isoformat(), "labels": []}
+    cache = PlayersCache(tmp_path / "players.json", fake)
+    cache.rows(["AAA", "BBB"], date(2026, 10, 1))
+    cache.rows(["AAA", "BBB"], date(2026, 10, 5))      # still fresh
+    cache.rows(["AAA", "CCC"], date(2026, 10, 12))     # AAA and BBB are older than a week
+    assert calls == ["AAA", "BBB", "AAA", "CCC"]
+
+
+def test_players_route_returns_rows_for_the_users_stocks(client, monkeypatch):
+    import functioning.players as players
+    monkeypatch.setattr(app_module, "verify_ticker", lambda ticker: True)
+    monkeypatch.setattr(players.PlayersCache, "rows", lambda self, tickers, today=None: {t: {"labels": ["x"]} for t in tickers})
+    client.post("/apps/three-way/api/holdings", json={"ticker": "AAA", "quantity": 1})
+    assert client.get("/apps/three-way/api/players").get_json() == {"players": {"AAA": {"labels": ["x"]}}}

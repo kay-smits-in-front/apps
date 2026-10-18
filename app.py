@@ -539,6 +539,21 @@ def api_plan():
     return {"saved": True}
 
 
+@app.route("/apps/three-way/api/players")
+@login_required
+@limiter.limit("60 per hour", override_defaults=True)
+def api_players():
+    """Ownership, short interest, consensus and insider activity per stock of this user."""
+    user = approved_user()
+    if IS_PRODUCTION:
+        return {"error": "Uitgeschakeld op Render."}, 503
+    three_way_import()
+    from functioning.players import PlayersCache
+    tickers = [p.ticker for p in user_positions(user)]
+    with THREE_WAY_LOCK:
+        return {"players": PlayersCache().rows(tickers)}
+
+
 @app.route("/apps/three-way/api/search")
 @login_required
 @limiter.limit("120 per hour", override_defaults=True)

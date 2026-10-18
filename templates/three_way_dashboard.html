@@ -7,7 +7,7 @@
 {% if disabled %}
 <section class="tool-panel"><p>Het dashboard draait alleen lokaal. Op Render is het uitgeschakeld tot er persistente opslag is.</p></section>
 {% else %}
-<div id="dash" data-defaults='{{ defaults|tojson }}' data-source="{{ url_for('three_way_dashboard_data') }}" data-api="{{ url_for('api_holdings') }}" data-search="{{ url_for('api_search') }}" data-plan="{{ url_for('api_plan') }}" data-csrf="{{ csrf_token() }}">
+<div id="dash" data-defaults='{{ defaults|tojson }}' data-source="{{ url_for('three_way_dashboard_data') }}" data-api="{{ url_for('api_holdings') }}" data-search="{{ url_for('api_search') }}" data-plan="{{ url_for('api_plan') }}" data-players="{{ url_for('api_players') }}" data-csrf="{{ csrf_token() }}">
   <section class="tool-panel">
     <h2>Mijn aandelen</h2>
     <p>Voeg aandelen toe, pas aantallen aan of haal ze weg. Zoek bij Yahoo op naam, of vul zelf de Yahoo-ticker in (bijvoorbeeld NVDA, ASML.AS, MIH.F).</p>
@@ -70,6 +70,12 @@
     <h2>Daghandel</h2>
     <p>Zo ziet een daghandelaar de laatste handelsdag. Een volumepiek (veel meer handel dan normaal) laat zien waar grote spelers actief zijn. Een gap is de afstand tussen de slotkoers van gisteren en de opening van vandaag.</p>
     <div id="daytrade"></div>
+  </section>
+  <section class="tool-panel">
+    <h2>Wie zit erin</h2>
+    <p>Wie bezit het aandeel en wat doen ze? Institutionele beleggers (fondsen, banken), insiders (bestuurders), shortverkopers en analisten. Deze gegevens lopen vaak weken tot maanden achter, dus lees ze als achtergrond en niet als signaal van vandaag.</p>
+    <p class="helper" id="players-status"></p>
+    <div id="players"></div>
   </section>
   <section class="tool-panel"><h2>Verkopen en wat ze opleverden</h2><div id="sales"></div></section>
   <section class="tool-panel"><h2>Per aandeel</h2><div id="stocks"></div></section>

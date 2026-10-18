@@ -404,6 +404,27 @@
     el("daytrade").replaceChildren(rows.length ? table(["Aandeel", "Laatste dag", "Volume vs normaal", "Gap", "Dagrange", "Gem. range 14d", "RSI 14", "Opvallend"], rows)
       : html("p", "helper", "Nog geen volumegegevens. Klik op Bereken om de koersen opnieuw op te halen."));
   }
+  const compact = (v) => new Intl.NumberFormat("nl-NL", { notation: "compact", maximumFractionDigits: 1 }).format(v);
+  function playersRow(ticker, p) {
+    const flags = html("td");
+    p.labels.forEach((f) => flags.append(html("span", "flag", f)));
+    const net = p.insiders.net_value;
+    const holders = p.holders.map((h) => `${h.holder} ${h.pct ?? "-"}%`).join(", ") || "-";
+    const consensus = p.consensus_mean === null ? "-" : `${p.consensus_mean.toFixed(1)} (${p.analysts} analisten${p.target_upside_pct === null ? "" : `, doel ${p.target_upside_pct >= 0 ? "+" : ""}${p.target_upside_pct}%`})`;
+    return [ticker, cell(p.institutions_pct, "%"), cell(p.insiders_pct, "%"), cell(p.short_pct_float, "%", p.short_pct_float >= 15 ? "cold" : ""),
+      consensus, html("td", net > 0 ? "hot" : net < 0 ? "cold" : "", `${p.insiders.buys} kopen / ${p.insiders.sells} verkopen (${net >= 0 ? "+" : ""}${compact(net)})`), holders, flags];
+  }
+  async function loadPlayers(a) {
+    say("players-status", "Gegevens ophalen bij Yahoo (de eerste keer duurt even) ...");
+    try {
+      const { players } = await api("GET", root.dataset.players);
+      const rows = a.stocks.filter((s) => players[s.ticker]).map((s) => playersRow(s.ticker, players[s.ticker]));
+      el("players").replaceChildren(table(["Aandeel", "Institutioneel", "Insiders bezit", "Short (float)", "Analisten (1 = kopen, 5 = verkopen)", "Insiders 6 mnd", "Grootste houders", "Opvallend"], rows));
+      say("players-status", "");
+    } catch (error) {
+      say("players-status", error.message);
+    }
+  }
   function renderGroups(a) {
     const usingGroups = el("groups-on").checked;
     el("group-results").hidden = !usingGroups;
@@ -423,6 +444,7 @@
     if (!state.picked.size) a.stocks.slice(0, 5).forEach((s) => state.picked.add(s.ticker));
     renderTiles(a, state.dataB); renderValue(a, state.dataB);
     renderChips(a); renderPrices(a); renderSales(a); renderStocks(a); renderGroups(a); renderDaytrade(a);
+    if (!state.playersLoaded) { state.playersLoaded = true; loadPlayers(a); }
     buildAssignment(a.stocks.map((s) => s.ticker));
     if (a.failed.length) el("status").textContent = "Geen koersen voor: " + a.failed.join(", ");
   }
