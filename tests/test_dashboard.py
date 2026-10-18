@@ -429,3 +429,47 @@ def test_players_route_returns_rows_for_the_users_stocks(client, monkeypatch):
     monkeypatch.setattr(players.PlayersCache, "rows", lambda self, tickers, today=None: {t: {"labels": ["x"]} for t in tickers})
     client.post("/apps/three-way/api/holdings", json={"ticker": "AAA", "quantity": 1})
     assert client.get("/apps/three-way/api/players").get_json() == {"players": {"AAA": {"labels": ["x"]}}}
+
+
+# --------------------------------------------------- why now and timing
+
+
+def test_zigzag_finds_confirmed_turning_points():
+    from functioning.timing import zigzag
+    closes = [100, 110, 120, 100, 90, 80, 95, 110, 100]
+    points = [(p.index, p.kind) for p in zigzag(closes, 0, len(closes) - 1, 15.0)]
+    assert (2, "peak") in points and (5, "trough") in points
+    assert zigzag([100.0, 101.0, 100.0, 101.0], 0, 3, 15.0) == []
+
+
+def test_timing_stats_measure_delay_and_price_against_the_turn():
+    from functioning.timing import timing_stats
+    closes = [100.0, 110.0, 120.0, 100.0, 90.0, 80.0, 95.0, 110.0, 100.0]
+    stats = timing_stats(closes, sells=[4], buys=[7], first=0, last=8, window=3)
+    assert stats["sell"] == {"signals": 1, "matched": 1, "on_time": 1, "median_lag_days": 2.0, "median_price_pct": -25.0}
+    assert stats["buy"]["median_lag_days"] == 2.0 and stats["buy"]["median_price_pct"] == 37.5
+    late = timing_stats(closes, sells=[8], buys=[], first=0, last=8, window=3)
+    assert late["sell"]["on_time"] == 0 and late["buy"]["signals"] == 0 and late["buy"]["median_lag_days"] is None
+
+
+def test_why_now_counts_factors_leaning_each_way():
+    from functioning.prices import Series
+    from functioning.whynow import why_now
+    from functioning.rule import TrendRule
+    days = [TODAY - timedelta(days=100 - i) for i in range(101)]
+    closes = [100.0] * 100 + [90.0]                      # sudden drop under the average
+    volumes = [100.0] * 100 + [400.0]                    # on a volume spike
+    series = Series("AAA", days, closes, 1.0, volumes)
+    card = why_now(series, TrendRule(20, 3.0, 1), invested=True, news=2.0, intuition=-3.0)
+    leans = {f["name"]: f["lean"] for f in card["factors"]}
+    assert leans["Regel"] == "negatief" and leans["Trend"] == "negatief" and leans["Volume"] == "negatief"
+    assert leans["Nieuws"] == "positief" and leans["Intuïtie"] == "negatief"
+    assert sum(card["counts"].values()) == len(card["factors"])
+    assert "Nieuws" not in {f["name"] for f in why_now(series, TrendRule(20, 3.0, 1), True, None, None)["factors"]}
+
+
+def test_panel_carries_why_and_timing(data_files):
+    out = run(data_files, Scenario(LIVE, 1.0, None))
+    stock = out["stocks"][0]
+    assert stock["why"]["factors"][0]["name"] == "Regel"
+    assert set(stock["timing"]) == {"peaks", "troughs", "sell", "buy"}

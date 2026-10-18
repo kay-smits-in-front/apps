@@ -418,12 +418,47 @@
     say("players-status", "Gegevens ophalen bij Yahoo (de eerste keer duurt even) ...");
     try {
       const { players } = await api("GET", root.dataset.players);
+      state.players = players;
+      renderWhy(a);
       const rows = a.stocks.filter((s) => players[s.ticker]).map((s) => playersRow(s.ticker, players[s.ticker]));
       el("players").replaceChildren(table(["Aandeel", "Institutioneel", "Insiders bezit", "Short (float)", "Analisten (1 = kopen, 5 = verkopen)", "Insiders 6 mnd", "Grootste houders", "Opvallend"], rows));
       say("players-status", "");
     } catch (error) {
       say("players-status", error.message);
     }
+  }
+  const PLAYER_LEANS = { "veel short": ["Short interest", "negatief"], "analisten: kopen": ["Analisten", "positief"], "analisten: verkopen": ["Analisten", "negatief"],
+    "insiders kopen": ["Insiders", "positief"], "insiders verkopen": ["Insiders", "negatief"] };
+  function whyFactors(s) {
+    const own = s.why.factors.map((f) => ({ ...f }));
+    const players = state.players && state.players[s.ticker];
+    if (players) players.labels.filter((l) => PLAYER_LEANS[l]).forEach((l) => own.push({ name: PLAYER_LEANS[l][0], lean: PLAYER_LEANS[l][1], text: l }));
+    return own;
+  }
+  function renderWhy(a) {
+    el("why").replaceChildren(...a.stocks.map((s) => {
+      const factors = whyFactors(s);
+      const count = (lean) => factors.filter((f) => f.lean === lean).length;
+      const card = html("div", "card");
+      const title = html("h3"); title.append(html("span", "", s.ticker), html("span", "", s.group ? plan.labels[s.group] : ""));
+      card.append(title, html("div", "sum", `${count("positief")} positief, ${count("negatief")} negatief, ${count("neutraal")} neutraal · ${s.why.day}`));
+      const list = html("ul");
+      factors.forEach((f) => {
+        const item = html("li"); item.append(html("span", `dot2 ${f.lean}`));
+        const text = html("span"); text.append(html("b", "", f.name + ": "), f.text);
+        item.append(text); list.append(item);
+      });
+      card.append(list);
+      return card;
+    }));
+  }
+  const lagText = (v) => (v === null ? "-" : `${v > 0 ? "+" : ""}${v}`);
+  function timingCells(part) {
+    return [`${part.on_time}/${part.signals}`, lagText(part.median_lag_days), part.median_price_pct === null ? "-" : `${part.median_price_pct > 0 ? "+" : ""}${part.median_price_pct}%`];
+  }
+  function renderTiming(a) {
+    const rows = a.stocks.map((s) => [s.ticker, `${s.timing.peaks} pieken, ${s.timing.troughs} dalen`, ...timingCells(s.timing.sell), ...timingCells(s.timing.buy)]);
+    el("timing").replaceChildren(table(["Aandeel", "Draaipunten", "Verkopen op tijd", "Vertraging (dgn)", "Koers t.o.v. piek", "Kopen op tijd", "Vertraging (dgn)", "Koers t.o.v. dal"], rows));
   }
   function renderGroups(a) {
     const usingGroups = el("groups-on").checked;
@@ -443,7 +478,7 @@
     const a = state.data;
     if (!state.picked.size) a.stocks.slice(0, 5).forEach((s) => state.picked.add(s.ticker));
     renderTiles(a, state.dataB); renderValue(a, state.dataB);
-    renderChips(a); renderPrices(a); renderSales(a); renderStocks(a); renderGroups(a); renderDaytrade(a);
+    renderChips(a); renderPrices(a); renderSales(a); renderStocks(a); renderGroups(a); renderDaytrade(a); renderWhy(a); renderTiming(a);
     if (!state.playersLoaded) { state.playersLoaded = true; loadPlayers(a); }
     buildAssignment(a.stocks.map((s) => s.ticker));
     if (a.failed.length) el("status").textContent = "Geen koersen voor: " + a.failed.join(", ");
