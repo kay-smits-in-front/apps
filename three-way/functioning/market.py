@@ -18,6 +18,9 @@ class Candle:
     day: date
     close: float
     volume: float
+    open: float = 0.0
+    high: float = 0.0
+    low: float = 0.0
 
 
 class Quote:
@@ -41,7 +44,10 @@ class Quote:
         if "Close" not in frame.columns:
             raise ValueError(f"Yahoo Finance returned no Close column for {self.ticker}.")
         candles = [
-            Candle(index.date(), float(row["Close"]), float(row.get("Volume") or 0.0))
+            Candle(
+                index.date(), float(row["Close"]), float(row.get("Volume") or 0.0),
+                float(row.get("Open") or 0.0), float(row.get("High") or 0.0), float(row.get("Low") or 0.0),
+            )
             for index, row in frame.iterrows()
             if float(row["Close"]) > 0
         ]
@@ -66,6 +72,18 @@ class Quote:
         """The fundamental figures we use (None where Yahoo has nothing)."""
         info = self._yahoo.info
         return {field: info.get(field) for field in INFO_FIELDS}
+
+    def full_info(self) -> dict:
+        """All fields Yahoo has for the stock (ownership, short interest, consensus)."""
+        return dict(self._yahoo.info)
+
+    def institutional_holders(self):
+        """The biggest institutional holders as a DataFrame (may be empty)."""
+        return self._yahoo.institutional_holders
+
+    def insider_transactions(self):
+        """Recent buys and sales by insiders as a DataFrame (may be empty)."""
+        return self._yahoo.insider_transactions
 
     def price_targets(self) -> dict[str, float]:
         """Yahoo price targets: current, low, high, mean, median."""

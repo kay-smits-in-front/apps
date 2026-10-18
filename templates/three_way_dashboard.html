@@ -7,7 +7,7 @@
 {% if disabled %}
 <section class="tool-panel"><p>Het dashboard draait alleen lokaal. Op Render is het uitgeschakeld tot er persistente opslag is.</p></section>
 {% else %}
-<div id="dash" data-defaults='{{ defaults|tojson }}' data-source="{{ url_for('three_way_dashboard_data') }}" data-api="{{ url_for('api_holdings') }}" data-search="{{ url_for('api_search') }}" data-plan="{{ url_for('api_plan') }}" data-csrf="{{ csrf_token() }}">
+<div id="dash" data-defaults='{{ defaults|tojson }}' data-source="{{ url_for('three_way_dashboard_data') }}" data-api="{{ url_for('api_holdings') }}" data-search="{{ url_for('api_search') }}" data-plan="{{ url_for('api_plan') }}" data-players="{{ url_for('api_players') }}" data-csrf="{{ csrf_token() }}">
   <section class="tool-panel">
     <h2>Mijn aandelen</h2>
     <p>Voeg aandelen toe, pas aantallen aan of haal ze weg. Zoek bij Yahoo op naam, of vul zelf de Yahoo-ticker in (bijvoorbeeld NVDA, ASML.AS, MIH.F).</p>
@@ -61,10 +61,32 @@
     <h2>Koersen vergelijken</h2>
     <p>Alle koersen starten op 100. Klik een aandeel aan of uit.</p>
     <div class="chips" id="chips"></div>
+    <label class="check"><input type="checkbox" id="spikes-on" checked> Volumepieken tonen (stip = dag met minstens 2x het normale volume)</label>
     <div class="chart" id="price-chart"></div>
   </section>
 
   <section class="tool-panel" id="group-results" hidden><h2>Per groep</h2><div id="groups"></div></section>
+  <section class="tool-panel">
+    <h2>Daghandel</h2>
+    <p>Zo ziet een daghandelaar de laatste handelsdag. Een volumepiek (veel meer handel dan normaal) laat zien waar grote spelers actief zijn. Een gap is de afstand tussen de slotkoers van gisteren en de opening van vandaag.</p>
+    <div id="daytrade"></div>
+  </section>
+  <section class="tool-panel">
+    <h2>Waarom nu</h2>
+    <p>Per aandeel wat er vandaag voor of tegen pleit. Elke regel is een factor: positief (reden om te houden of te kopen), negatief (reden om te verkopen) of neutraal. De kaart telt alleen, ze weegt niet. De factoren van "Wie zit erin" komen erbij zodra die geladen zijn.</p>
+    <div class="cards" id="why"></div>
+  </section>
+  <section class="tool-panel">
+    <h2>Timing van regel A</h2>
+    <p>Een draaipunt is een piek of dal gevolgd door een omslag van minstens 15%. "Op tijd" betekent een verkoop of koop binnen 10 handelsdagen van zo'n punt. Vertraging is positief als je te laat was en negatief als je te vroeg was. De koers is die van je verkoop of koop ten opzichte van het draaipunt.</p>
+    <div id="timing"></div>
+  </section>
+  <section class="tool-panel">
+    <h2>Wie zit erin</h2>
+    <p>Wie bezit het aandeel en wat doen ze? Institutionele beleggers (fondsen, banken), insiders (bestuurders), shortverkopers en analisten. Deze gegevens lopen vaak weken tot maanden achter, dus lees ze als achtergrond en niet als signaal van vandaag.</p>
+    <p class="helper" id="players-status"></p>
+    <div id="players"></div>
+  </section>
   <section class="tool-panel"><h2>Verkopen en wat ze opleverden</h2><div id="sales"></div></section>
   <section class="tool-panel"><h2>Per aandeel</h2><div id="stocks"></div></section>
 </div>

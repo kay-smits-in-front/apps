@@ -32,7 +32,11 @@ def data_files(tmp_path):
         for _ in days:
             price *= 1 + rng.gauss(0.0005, 0.03)
             closes.append(price)
-        cache[ticker] = {"fetched": TODAY.isoformat(), "fx": 0.9, "days": [x.isoformat() for x in days], "closes": closes}
+        cache[ticker] = {
+            "fetched": TODAY.isoformat(), "fx": 0.9, "days": [x.isoformat() for x in days], "closes": closes,
+            "volumes": [1000.0 * (1 + rng.random() * (6 if k % 37 == 0 else 0.5)) for k in range(len(days))],
+            "opens": [c * 0.995 for c in closes], "highs": [c * 1.02 for c in closes], "lows": [c * 0.98 for c in closes],
+        }
     (tmp_path / "prices.json").write_text(json.dumps(cache))
     (tmp_path / "holdings.json").write_text(json.dumps({"holdings": [
         {"ticker": "AAA", "quantity": 10, "cost_eur": 900}, {"ticker": "BBB", "quantity": 5, "cost_eur": 400}]}))
@@ -300,3 +304,172 @@ def test_dashboard_data_uses_the_users_own_stocks(client, monkeypatch, data_file
     client.post("/apps/three-way/api/holdings", json={"ticker": "AAA", "quantity": 2})
     assert client.get("/apps/three-way/dashboard/data").status_code == 200
     assert seen["tickers"] == ["AAA"] and seen["ledger"].load() == []
+
+
+# ----------------------------------------------------------- day trading
+
+
+def test_day_metrics():
+    from functioning import daytrade as d
+    volumes = [100.0] * 20 + [350.0]
+    assert d.relative_volume(volumes, 20) == pytest.approx(3.5)
+    assert d.relative_volume(volumes, 5) is None
+    assert d.gap_pct([0, 103.0], [100.0, 104.0], 1) == pytest.approx(3.0)
+    assert d.range_pct([0, 110.0], [0, 90.0], [0, 100.0], 1) == pytest.approx(20.0)
+    assert d.rsi([float(i) for i in range(30)], 29) == 100.0
+    assert d.rsi([float(30 - i) for i in range(30)], 29) == pytest.approx(0.0)
+    assert d.rsi([1.0] * 5, 4) is None
+
+
+def test_volume_rule_follows_the_money():
+    from functioning.daytrade import VolumeRule
+    from functioning.rule import Signal
+    volumes = tuple([100.0] * 25 + [400.0])
+    rule = VolumeRule(spike_x=2.0, min_move_pct=2.0, review_days=1, volumes=volumes)
+    down = [100.0] * 25 + [95.0]
+    up = [100.0] * 25 + [105.0]
+    assert rule.trend_outcome(down, 25, invested=True).signal is Signal.SELL
+    assert rule.trend_outcome(down, 25, invested=False).signal is Signal.NONE
+    assert rule.trend_outcome(up, 25, invested=False).signal is Signal.BUY
+    assert rule.trend_outcome(up, 25, invested=True).signal is Signal.NONE
+    small = [100.0] * 25 + [100.5]
+    assert rule.trend_outcome(small, 25, invested=False).signal is Signal.NONE
+    assert VolumeRule(2.0, 2.0, 1).trend_outcome(up, 25, invested=False).signal is Signal.NONE
+
+
+def test_panel_has_last_day_numbers_and_spikes(data_files):
+    out = run(data_files, Scenario(LIVE))
+    panel = out["stocks"][0]["daytrade"]
+    assert panel["last"]["day"] == TODAY.isoformat() or panel["last"]["day"] < TODAY.isoformat()
+    assert set(panel["last"]) >= {"rel_volume", "gap_pct", "range_pct", "atr_pct", "rsi", "flags"}
+    assert panel["last"]["range_pct"] == pytest.approx(4.0, abs=0.01)  # 2% above and 2% under the close
+    assert panel["spikes"], "the fixture has volume spikes"
+
+
+def test_a_group_can_follow_the_volume_rule(data_files):
+    from functioning.daytrade import VolumeRule
+    from functioning.groups import plan_from_json
+    plan = plan_from_json({"groups": {"AAA": "volume"}})
+    out = run(data_files, Scenario(LIVE, None, None, plan))
+    assert "volume" in out["stocks"][0]["strategy"]
+    assert isinstance(plan.strategy_for("AAA", None), VolumeRule)
+
+
+def test_stale_cache_without_volumes_is_refetched():
+    from functioning.prices import PriceCache
+    assert not PriceCache.is_fresh({"fetched": TODAY.isoformat(), "closes": []}, TODAY)
+    assert PriceCache.is_fresh({"fetched": TODAY.isoformat(), "volumes": []}, TODAY)
+
+
+# ------------------------------------------------------------- players
+
+
+def players_frames():
+    import pandas as pd
+    holders = pd.DataFrame({"Holder": ["Vanguard", "BlackRock", "Small Fund", "Tiny"], "pctHeld": [0.09, 0.08, 0.01, 0.002],
+                            "pctChange": [0.02, -0.01, 0.0, 0.0]})
+    transactions = pd.DataFrame({
+        "Start Date": pd.to_datetime(["2026-09-20", "2026-09-01", "2026-08-01", "2025-01-01", "2026-09-10"]),
+        "Text": ["Purchase at price 10 per share", "Sale at price 12 per share", "Stock Gift", "Purchase at price 5", "Stock Award(Grant)"],
+        "Value": [50000.0, 20000.0, 9000.0, 99999.0, 7000.0],
+    })
+    return holders, transactions
+
+
+def test_ownership_turns_fractions_into_percent():
+    from functioning.players import ownership
+    own = ownership({"heldPercentInstitutions": 0.62, "shortPercentOfFloat": 0.18, "recommendationMean": 2.0,
+                     "numberOfAnalystOpinions": 12, "targetMeanPrice": 120, "currentPrice": 100, "shortRatio": "Infinity"})
+    assert own["institutions_pct"] == 62.0 and own["short_pct_float"] == 18.0 and own["target_upside_pct"] == 20.0
+    assert own["insiders_pct"] is None and own["short_ratio"] is None and own["analysts"] == 12
+
+
+def test_top_holders_sorted_and_limited():
+    from functioning.players import top_holders
+    holders, _ = players_frames()
+    top = top_holders(holders)
+    assert [h["holder"] for h in top] == ["Vanguard", "BlackRock", "Small Fund"]
+    assert top[0]["pct"] == 9.0 and top[1]["change_pct"] == -1.0
+    assert top_holders(None) == []
+
+
+def test_insider_activity_counts_only_real_trades_inside_the_window():
+    from functioning.players import insider_activity
+    _, transactions = players_frames()
+    result = insider_activity(transactions, date(2026, 10, 17))
+    assert result == {"buys": 1, "sells": 1, "net_value": 30000.0}
+    assert insider_activity(None, date(2026, 10, 17))["buys"] == 0
+
+
+def test_labels_for_what_stands_out():
+    from functioning.players import labels
+    own = {"short_pct_float": 20.0, "institutions_pct": 80.0, "consensus_mean": 1.8, "analysts": 10}
+    found = labels(own, {"net_value": 100.0})
+    assert found == ["veel short", "veel institutioneel", "analisten: kopen", "insiders kopen"]
+    assert labels({"short_pct_float": None, "institutions_pct": None, "consensus_mean": 3.0, "analysts": 1}, {"net_value": 0.0}) == []
+
+
+def test_players_cache_only_fetches_stale_tickers(tmp_path):
+    from functioning.players import PlayersCache
+    calls = []
+
+    def fake(ticker, today):
+        calls.append(ticker)
+        return {"fetched": today.isoformat(), "labels": []}
+    cache = PlayersCache(tmp_path / "players.json", fake)
+    cache.rows(["AAA", "BBB"], date(2026, 10, 1))
+    cache.rows(["AAA", "BBB"], date(2026, 10, 5))      # still fresh
+    cache.rows(["AAA", "CCC"], date(2026, 10, 12))     # AAA and BBB are older than a week
+    assert calls == ["AAA", "BBB", "AAA", "CCC"]
+
+
+def test_players_route_returns_rows_for_the_users_stocks(client, monkeypatch):
+    import functioning.players as players
+    monkeypatch.setattr(app_module, "verify_ticker", lambda ticker: True)
+    monkeypatch.setattr(players.PlayersCache, "rows", lambda self, tickers, today=None: {t: {"labels": ["x"]} for t in tickers})
+    client.post("/apps/three-way/api/holdings", json={"ticker": "AAA", "quantity": 1})
+    assert client.get("/apps/three-way/api/players").get_json() == {"players": {"AAA": {"labels": ["x"]}}}
+
+
+# --------------------------------------------------- why now and timing
+
+
+def test_zigzag_finds_confirmed_turning_points():
+    from functioning.timing import zigzag
+    closes = [100, 110, 120, 100, 90, 80, 95, 110, 100]
+    points = [(p.index, p.kind) for p in zigzag(closes, 0, len(closes) - 1, 15.0)]
+    assert (2, "peak") in points and (5, "trough") in points
+    assert zigzag([100.0, 101.0, 100.0, 101.0], 0, 3, 15.0) == []
+
+
+def test_timing_stats_measure_delay_and_price_against_the_turn():
+    from functioning.timing import timing_stats
+    closes = [100.0, 110.0, 120.0, 100.0, 90.0, 80.0, 95.0, 110.0, 100.0]
+    stats = timing_stats(closes, sells=[4], buys=[7], first=0, last=8, window=3)
+    assert stats["sell"] == {"signals": 1, "matched": 1, "on_time": 1, "median_lag_days": 2.0, "median_price_pct": -25.0}
+    assert stats["buy"]["median_lag_days"] == 2.0 and stats["buy"]["median_price_pct"] == 37.5
+    late = timing_stats(closes, sells=[8], buys=[], first=0, last=8, window=3)
+    assert late["sell"]["on_time"] == 0 and late["buy"]["signals"] == 0 and late["buy"]["median_lag_days"] is None
+
+
+def test_why_now_counts_factors_leaning_each_way():
+    from functioning.prices import Series
+    from functioning.whynow import why_now
+    from functioning.rule import TrendRule
+    days = [TODAY - timedelta(days=100 - i) for i in range(101)]
+    closes = [100.0] * 100 + [90.0]                      # sudden drop under the average
+    volumes = [100.0] * 100 + [400.0]                    # on a volume spike
+    series = Series("AAA", days, closes, 1.0, volumes)
+    card = why_now(series, TrendRule(20, 3.0, 1), invested=True, news=2.0, intuition=-3.0)
+    leans = {f["name"]: f["lean"] for f in card["factors"]}
+    assert leans["Regel"] == "negatief" and leans["Trend"] == "negatief" and leans["Volume"] == "negatief"
+    assert leans["Nieuws"] == "positief" and leans["Intuïtie"] == "negatief"
+    assert sum(card["counts"].values()) == len(card["factors"])
+    assert "Nieuws" not in {f["name"] for f in why_now(series, TrendRule(20, 3.0, 1), True, None, None)["factors"]}
+
+
+def test_panel_carries_why_and_timing(data_files):
+    out = run(data_files, Scenario(LIVE, 1.0, None))
+    stock = out["stocks"][0]
+    assert stock["why"]["factors"][0]["name"] == "Regel"
+    assert set(stock["timing"]) == {"peaks", "troughs", "sell", "buy"}
