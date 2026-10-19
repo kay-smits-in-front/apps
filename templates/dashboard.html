@@ -1,18 +1,15 @@
 {% extends "base.html" %}
 {% block title %}Dashboard · kay.apps{% endblock %}
 {% block content %}
-<div class="section-label"><span>JOUW APPS</span><span class="section-count">02 / BESCHIKBAAR</span></div>
+<div class="section-label"><span>JOUW APPS</span><span class="section-count">03 / BESCHIKBAAR</span></div>
 <section class="app-grid">
-  <a class="app-card app-card-link" href="{{ url_for('three_way_dashboard') }}">
-    <div class="app-card-top"><div class="app-icon">↗</div><span class="status"><span></span>Lokaal</span></div>
-    <h2>Three Way</h2><p>Beleggingsdashboard: situatie, maximum en wat-als-regels per aandeel.</p>
-    <div class="app-card-bottom"><span class="app-type">FINANCE · ANALYSE</span><span class="arrow">↗</span></div>
+  {% for item in apps %}
+  <a class="app-card app-card-link" href="{{ item.url }}">
+    <div class="app-card-top"><div class="app-icon">{{ item.icon }}</div><span class="status"><span></span>{{ item.status }}</span></div>
+    <h2>{{ item.name }}</h2><p>{{ item.description }}</p>
+    <div class="app-card-bottom"><span class="app-type">{% if item.name == "Three Way" %}FINANCE · ANALYSE{% elif item.name == "KLM" %}DRONE · AI · MAPPING{% else %}THINKING · PLAY{% endif %}</span><span class="arrow">↗</span></div>
   </a>
-  <a class="app-card app-card-link" href="{{ url_for('thinkwave') }}">
-    <div class="app-card-top"><div class="app-icon">✳</div><span class="status"><span></span>PlayCanvas</span></div>
-    <h2>Thinkwave</h2><p>Open de Thinkwave-ervaring vanuit je persoonlijke app-portaal.</p>
-    <div class="app-card-bottom"><span class="app-type">THINKING · PLAY</span><span class="arrow">↗</span></div>
-  </a>
+  {% endfor %}
   <article class="app-card add-card"><div class="add-symbol">+</div><h2>Meer volgt</h2><p>Nieuwe persoonlijke apps verschijnen hier zodra je ze toevoegt.</p><div class="app-card-bottom"><span class="app-type">YOUR NEXT IDEA</span><span class="arrow">✳</span></div></article>
 </section>
 {% endblock %}
