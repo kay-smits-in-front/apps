@@ -298,9 +298,22 @@ def dashboard():
         logout_user()
         flash("Je account heeft nog geen toegang.", "error")
         return redirect(url_for("login"))
-    apps = [{"name": "Three Way", "description": "Beleggingsanalyse en portefeuille-inzichten.",
-             "status": "Koppeling volgt", "icon": "↗", "url": None}]
+    apps = [
+        {"name": "Three Way", "description": "Beleggingsanalyse en portefeuille-inzichten.",
+         "status": "Lokaal", "icon": "↗", "url": url_for("three_way_dashboard")},
+        {"name": "KLM", "description": "Basisdashboard voor de DJI Tello: verkenning, mapping en AI-interactie.",
+         "status": "Opzet", "icon": "⌁", "url": url_for("klm_dashboard")},
+        {"name": "Thinkwave", "description": "Open de Thinkwave-ervaring vanuit je persoonlijke app-portaal.",
+         "status": "PlayCanvas", "icon": "✳", "url": url_for("thinkwave")},
+    ]
     return render_template("dashboard.html", apps=apps)
+
+
+@app.route("/apps/klm")
+@login_required
+def klm_dashboard():
+    approved_user()
+    return render_template("klm_dashboard.html")
 
 
 @app.route("/apps/three-way")
