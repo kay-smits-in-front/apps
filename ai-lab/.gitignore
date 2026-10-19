@@ -1,0 +1,3 @@
+runs/*.json
+__pycache__/
+*.egg-info/
