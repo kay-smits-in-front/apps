@@ -511,3 +511,15 @@ def test_latest_ai_run_reads_the_newest_file(tmp_path):
 def test_ai_route_needs_login_and_gives_non_admin_nothing(client):
     assert app_module.app.test_client().get("/apps/three-way/dashboard/ai").status_code == 302
     assert client.get("/apps/three-way/dashboard/ai").get_json() == {"run": None}
+
+
+def test_ai_runs_lists_newest_first_and_portal_keeps_every_app(client, tmp_path):
+    (tmp_path / "20261001-000000-demo.json").write_text(json.dumps(
+        {"experiment": "demo", "time": "20261001-000000", "result": {"rule_pct": 1.0, "hold_pct": 2.0, "wins": 3, "total_periods": 9}}))
+    (tmp_path / "20261002-000000-other.json").write_text(json.dumps({"experiment": "other", "result": {}}))
+    rows = app_module.ai_runs(tmp_path)
+    assert [r["experiment"] for r in rows] == ["other", "demo"] and "3/9" in rows[1]["headline"]
+    assert app_module.app.test_client().get("/apps/ai-lab").status_code == 302
+    assert client.get("/apps/ai-lab").status_code == 200
+    page = client.get("/dashboard").data
+    assert all(name in page for name in (b"Three Way", b"KLM", b"AI-LAB", b"Thinkwave"))

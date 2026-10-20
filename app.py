@@ -304,6 +304,8 @@ def dashboard():
          "status": "Lokaal", "icon": "↗", "url": url_for("three_way_dashboard")},
         {"name": "KLM", "description": "Basisdashboard voor de DJI Tello: verkenning, mapping en AI-interactie.",
          "status": "Opzet", "icon": "⌁", "url": url_for("klm_dashboard")},
+        {"name": "AI-LAB", "description": "Modellen vanaf nul bouwen en streng toetsen. Three Way is het eerste onderwerp.",
+         "status": "Lokaal", "icon": "✦", "url": url_for("ai_lab")},
         {"name": "Thinkwave", "description": "Open de Thinkwave-ervaring vanuit je persoonlijke app-portaal.",
          "status": "PlayCanvas", "icon": "✳", "url": url_for("thinkwave")},
     ]
@@ -523,6 +525,27 @@ def latest_ai_run(experiment: str, folder: Path | None = None) -> dict | None:
     import json
     files = sorted((folder or Path(AI_LAB_PATH) / "runs").glob(f"*-{experiment}.json"))
     return json.loads(files[-1].read_text()) if files else None
+
+
+def ai_runs(folder: Path | None = None) -> list[dict]:
+    """All saved AI-Lab runs, newest first, with the headline of each."""
+    import json
+    rows = []
+    for path in sorted((folder or Path(AI_LAB_PATH) / "runs").glob("*.json"), reverse=True):
+        run = json.loads(path.read_text())
+        result = run.get("result", {})
+        rows.append({"experiment": run.get("experiment", path.stem), "time": run.get("time", ""),
+                     "headline": (f"model {result['rule_pct']:+.1f}% tegen vasthouden {result['hold_pct']:+.1f}%, "
+                                  f"{result['wins']}/{result['total_periods']} perioden gewonnen")
+                     if "rule_pct" in result else ""})
+    return rows
+
+
+@app.route("/apps/ai-lab")
+@login_required
+def ai_lab():
+    user = approved_user()
+    return render_template("ai_lab.html", runs=ai_runs() if user.is_admin else [], is_admin=user.is_admin)
 
 
 @app.route("/apps/three-way/dashboard/ai")

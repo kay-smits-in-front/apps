@@ -1,13 +1,13 @@
 {% extends "base.html" %}
 {% block title %}Dashboard · kay.apps{% endblock %}
 {% block content %}
-<div class="section-label"><span>JOUW APPS</span><span class="section-count">03 / BESCHIKBAAR</span></div>
+<div class="section-label"><span>JOUW APPS</span><span class="section-count">04 / BESCHIKBAAR</span></div>
 <section class="app-grid">
   {% for item in apps %}
   <a class="app-card app-card-link" href="{{ item.url }}">
     <div class="app-card-top"><div class="app-icon">{{ item.icon }}</div><span class="status"><span></span>{{ item.status }}</span></div>
     <h2>{{ item.name }}</h2><p>{{ item.description }}</p>
-    <div class="app-card-bottom"><span class="app-type">{% if item.name == "Three Way" %}FINANCE · ANALYSE{% elif item.name == "KLM" %}DRONE · AI · MAPPING{% else %}THINKING · PLAY{% endif %}</span><span class="arrow">↗</span></div>
+    <div class="app-card-bottom"><span class="app-type">{% if item.name == "Three Way" %}FINANCE · ANALYSE{% elif item.name == "AI-LAB" %}AI · ONDERZOEK{% elif item.name == "KLM" %}DRONE · AI · MAPPING{% else %}THINKING · PLAY{% endif %}</span><span class="arrow">↗</span></div>
   </a>
   {% endfor %}
   <article class="app-card add-card"><div class="add-symbol">+</div><h2>Meer volgt</h2><p>Nieuwe persoonlijke apps verschijnen hier zodra je ze toevoegt.</p><div class="app-card-bottom"><span class="app-type">YOUR NEXT IDEA</span><span class="arrow">✳</span></div></article>

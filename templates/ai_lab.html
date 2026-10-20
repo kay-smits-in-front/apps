@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}AI-LAB · kay.apps{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
+<div class="subnav"><a href="{{ url_for('dashboard') }}">← Portaal</a><a href="{{ url_for('three_way_dashboard') }}">Three Way dashboard →</a></div>
+<p class="eyebrow">AI · ONDERZOEK</p><h1 class="page-title">AI-LAB</h1>
+<section class="tool-panel">
+  <h2>Hoe het werkt</h2>
+  <p>Het lab zelf draai je in PyCharm (map ai-lab in de apps-repo). Elke run schrijft een resultaat weg. Deze pagina toont de runs, en het Three Way dashboard toont de laatste run van three_way_turns in het blok "AI-indicatie".</p>
+</section>
+<section class="tool-panel">
+  <h2>Runs</h2>
+  {% if not is_admin %}<p>Alleen de beheerder ziet de runs.</p>
+  {% elif not runs %}<p>Nog geen runs. Draai <code>python experiments/three_way_turns/run.py</code> in de map ai-lab.</p>
+  {% else %}
+  <table class="data"><thead><tr><th>Experiment</th><th>Tijd</th><th>Uitkomst</th></tr></thead><tbody>
+    {% for run in runs %}<tr><td>{{ run.experiment }}</td><td>{{ run.time }}</td><td>{{ run.headline }}</td></tr>{% endfor %}
+  </tbody></table>
+  {% endif %}
+</section>
+{% endblock %}
