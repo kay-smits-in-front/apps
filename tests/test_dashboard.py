@@ -499,3 +499,15 @@ def test_research_compares_rule_with_hold_per_period(data_files):
 def test_research_route_needs_login_and_rejects_bad_input(client):
     assert app_module.app.test_client().get("/apps/three-way/dashboard/research").status_code == 302
     assert client.get("/apps/three-way/dashboard/research?up_pct=9999").status_code == 400
+
+
+def test_latest_ai_run_reads_the_newest_file(tmp_path):
+    assert app_module.latest_ai_run("demo", tmp_path) is None
+    (tmp_path / "20261001-000000-demo.json").write_text(json.dumps({"time": "old"}))
+    (tmp_path / "20261002-000000-demo.json").write_text(json.dumps({"time": "new"}))
+    assert app_module.latest_ai_run("demo", tmp_path)["time"] == "new"
+
+
+def test_ai_route_needs_login_and_gives_non_admin_nothing(client):
+    assert app_module.app.test_client().get("/apps/three-way/dashboard/ai").status_code == 302
+    assert client.get("/apps/three-way/dashboard/ai").get_json() == {"run": None}

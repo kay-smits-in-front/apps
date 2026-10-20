@@ -90,6 +90,7 @@ login_manager.login_message = "Log eerst in om deze pagina te bekijken."
 # scripts in a short-lived web dyno or exposing personal data to a shared service.
 THREE_WAY_PATH = os.path.abspath(os.getenv("THREE_WAY_PATH", os.path.join(os.path.dirname(__file__), "three-way")))
 THREE_WAY_LOCK = threading.Lock()
+AI_LAB_PATH = os.path.abspath(os.getenv("AI_LAB_PATH", os.path.join(os.path.dirname(__file__), "ai-lab")))
 
 
 class User(UserMixin, db.Model):
@@ -515,6 +516,25 @@ def three_way_dashboard_research():
     with THREE_WAY_LOCK:
         series, failed = PriceCache().series(list(quantities))
         return research_data(series, scenario, quantities) | {"failed": failed}
+
+
+def latest_ai_run(experiment: str, folder: Path | None = None) -> dict | None:
+    """The newest saved run of an AI-Lab experiment (plain JSON, no AI libraries needed here)."""
+    import json
+    files = sorted((folder or Path(AI_LAB_PATH) / "runs").glob(f"*-{experiment}.json"))
+    return json.loads(files[-1].read_text()) if files else None
+
+
+@app.route("/apps/three-way/dashboard/ai")
+@login_required
+def three_way_dashboard_ai():
+    user = approved_user()
+    if not user.is_admin:
+        return {"run": None}
+    run = latest_ai_run("three_way_turns")
+    if run:
+        run["result"].pop("periods", None)
+    return {"run": run}
 
 
 @app.route("/apps/three-way/api/holdings", methods=["GET", "POST"])

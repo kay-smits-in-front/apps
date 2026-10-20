@@ -7,7 +7,7 @@
 {% if disabled %}
 <section class="tool-panel"><p>Het dashboard draait alleen lokaal. Op Render is het uitgeschakeld tot er persistente opslag is.</p></section>
 {% else %}
-<div id="dash" data-defaults='{{ defaults|tojson }}' data-source="{{ url_for('three_way_dashboard_data') }}" data-research="{{ url_for('three_way_dashboard_research') }}" data-api="{{ url_for('api_holdings') }}" data-search="{{ url_for('api_search') }}" data-plan="{{ url_for('api_plan') }}" data-players="{{ url_for('api_players') }}" data-csrf="{{ csrf_token() }}">
+<div id="dash" data-defaults='{{ defaults|tojson }}' data-source="{{ url_for('three_way_dashboard_data') }}" data-ai="{{ url_for('three_way_dashboard_ai') }}" data-research="{{ url_for('three_way_dashboard_research') }}" data-api="{{ url_for('api_holdings') }}" data-search="{{ url_for('api_search') }}" data-plan="{{ url_for('api_plan') }}" data-players="{{ url_for('api_players') }}" data-csrf="{{ csrf_token() }}">
   <section class="tool-panel">
     <h2>Mijn aandelen</h2>
     <p>Voeg aandelen toe, pas aantallen aan of haal ze weg. Zoek bij Yahoo op naam, of vul zelf de Yahoo-ticker in (bijvoorbeeld NVDA, ASML.AS, MIH.F).</p>
@@ -87,6 +87,13 @@
     <p class="helper" id="research-status"></p>
     <div id="research-total"></div>
     <div id="research-stocks"></div>
+  </section>
+  <section class="tool-panel">
+    <h2>AI-indicatie</h2>
+    <p>Uitkomst van de laatste run uit het AI-Lab (experiment three_way_turns). Het model leert op het verleden en wordt getest op de periode erna, kosten inbegrepen. Het dashboard rekent zelf niets: het toont alleen wat je run heeft opgeleverd. Alleen de uitkomst over losse testperiodes telt, niet hoe goed het model het verleden kent.</p>
+    <p class="helper" id="ai-status"></p>
+    <div id="ai-total"></div>
+    <div id="ai-weights"></div>
   </section>
   <section class="tool-panel">
     <h2>Wie zit erin</h2>

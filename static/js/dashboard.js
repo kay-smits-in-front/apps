@@ -4,6 +4,7 @@
   const defaults = JSON.parse(root.dataset.defaults);
   const source = root.dataset.source;
   const research = root.dataset.research;
+  const aiSource = root.dataset.ai;
   const NS = "http://www.w3.org/2000/svg";
   const COLORS = { hold: "#929bad", a: "#7c8cff", b: "#e58cff", max: "#b5f36d", executed: "#ffb454" };
   const RULE_FIELDS = [
@@ -481,6 +482,28 @@
     const rows = r.stocks.map((s) => [s.ticker, ...summaryCells(s)]);
     el("research-stocks").replaceChildren(table(["Aandeel", ...head.slice(1)], rows));
   }
+  async function loadAi() {
+    try {
+      const response = await fetch(aiSource, { credentials: "same-origin" });
+      if (!(response.headers.get("content-type") || "").includes("json")) throw new Error("Geen data (status " + response.status + ").");
+      renderAi((await response.json()).run);
+    } catch (error) {
+      el("ai-status").textContent = error.message;
+    }
+  }
+  function renderAi(run) {
+    if (!run) {
+      el("ai-status").textContent = "Nog geen run. Draai experiments/three_way_turns/run.py in de ai-lab-map.";
+      return;
+    }
+    const r = run.result, c = run.config;
+    el("ai-status").textContent = `Run van ${run.time}. Verkoopsignaal bij kans vanaf ${c.threshold}, daling van minstens ${c.min_drop_pct}% binnen ${c.horizon_days} dagen. Kosten €${c.cost_eur} per transactie.`;
+    el("ai-total").replaceChildren(table(["", "Model", "Vasthouden", "Perioden gewonnen", "Transacties"],
+      [["Samengesteld over testperiodes", pctText(r.rule_pct), pctText(r.hold_pct), `${r.wins}/${r.total_periods}`, String(r.trades)]]));
+    const rows = Object.entries(r.weights_mean).sort((x, y) => Math.abs(y[1]) - Math.abs(x[1])).map(([name, w]) => [name, `${w > 0 ? "+" : ""}${w}`]);
+    el("ai-weights").replaceChildren(table(["Factor", "Gewicht (positief: daling waarschijnlijker)"], rows));
+  }
+  const pctText = (v) => `${v > 0 ? "+" : ""}${v}%`;
   function renderGroups(a) {
     const usingGroups = el("groups-on").checked;
     el("group-results").hidden = !usingGroups;
@@ -531,6 +554,7 @@
     }
   }
 
+  loadAi();
   buildFields("a"); buildFields("b"); fillFields("a"); fillFields("b");
   el("presets").replaceChildren(...PRESETS.map(([label, patch]) => {
     const button = html("button", "chip", label);
