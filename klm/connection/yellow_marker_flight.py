@@ -1,15 +1,13 @@
-"""Supervised first flight: take off, move forward, turn around, then descend until yellow is seen.
+"""Supervised Tello flight: search for a yellow floor marker, then cautiously approach it.
 
 Run from the apps repository root:
     python -m klm.connection.yellow_marker_flight
 
-Safety:
-- Start in a clear indoor area, with the yellow X visible on the floor.
-- This is an early vision test, not a guaranteed autonomous landing system.
-- The Tello's forward-facing camera may still not see a floor marker.
-- Descent happens in small steps, stopping when yellow is detected or the safe search limit is reached.
-- The script stops for user confirmation before any marker-guided approach/landing.
-- Press Q in the camera window to abort; the script will attempt to land.
+IMPORTANT:
+- This is experimental visual-servo code, not a certified landing system.
+- The forward-facing camera cannot reliably prove that the drone is directly above a floor marker.
+- Test only in a large, clear, netted/soft area, with a spotter ready to intervene.
+- Press Q in the camera window to stop the automatic sequence; the script will attempt to land.
 """
 
 import time
@@ -25,6 +23,15 @@ DESCEND_STEP_CM = 20
 MAX_DESCENT_STEPS = 5
 HOVER_SECONDS = 2
 YELLOW_MIN_AREA = 180
+
+# Visual approach uses low-speed RC pulses, not long blind movements.
+APPROACH_SPEED = 10
+APPROACH_PULSE_SECONDS = 0.35
+APPROACH_PAUSE_SECONDS = 0.5
+MAX_APPROACH_SECONDS = 20
+CENTER_TOLERANCE = 0.12
+LANDING_MARKER_AREA = 7000
+MAX_LOST_FRAMES = 5
 
 
 def find_yellow_marker(frame):
@@ -66,29 +73,103 @@ def find_yellow_marker(frame):
     return display, mask, (center_x, center_y, area)
 
 
+def show_camera(frame):
+    """Show the camera view and return True when Q was pressed."""
+    display, mask, marker = find_yellow_marker(frame.copy())
+    cv2.imshow("Tello - gele marker (Q = stoppen)", display)
+    cv2.imshow("Geel masker", mask)
+    return marker, (cv2.waitKey(1) & 0xFF) == ord("q")
+
+
 def zoeken(tello, camera):
-    """Descend 20 cm at a time until the yellow marker appears."""
+    """Descend 20 cm at a time until the yellow marker appears or Q is pressed."""
     for stap in range(MAX_DESCENT_STEPS):
+        frame = camera.frame
+        if frame is not None:
+            marker, stop = show_camera(frame)
+            if stop:
+                print("Zoeken afgebroken met Q.")
+                return None
+            if marker:
+                print("Geel kruis gevonden!")
+                return marker
+
         print(f"Dalen: stap {stap + 1}/{MAX_DESCENT_STEPS} ({DESCEND_STEP_CM} cm)...")
         tello.move_down(DESCEND_STEP_CM)
         time.sleep(HOVER_SECONDS)
 
-        # After each small descent, check the live image for the yellow marker.
-        frame = camera.frame
-        if frame is None:
-            continue
-
-        display, mask, marker = find_yellow_marker(frame.copy())
-        cv2.imshow("Tello - gele marker", display)
-        cv2.imshow("Geel masker", mask)
-        cv2.waitKey(1)
-
-        if marker:
-            print("Geel kruis gevonden!")
-            return marker
-
     print("Gele kruis niet gevonden binnen de ingestelde daalafstand.")
     return None
+
+
+def nader_en_landen(tello, camera):
+    """Use short, low-speed corrections to approach the marker and land when it looks large.
+
+    This is only a cautious prototype: marker pixel area is not a reliable distance
+    measurement, so the landing threshold must be validated in controlled tests.
+    """
+    print("Marker volgen gestart. Druk op Q in het cameravenster om te stoppen.")
+    start = time.monotonic()
+    lost_frames = 0
+
+    while time.monotonic() - start < MAX_APPROACH_SECONDS:
+        frame = camera.frame
+        if frame is None:
+            tello.send_rc_control(0, 0, 0, 0)
+            time.sleep(0.1)
+            continue
+
+        marker, stop = show_camera(frame)
+        if stop:
+            print("Nadering afgebroken met Q.")
+            tello.send_rc_control(0, 0, 0, 0)
+            return False
+
+        if marker is None:
+            lost_frames += 1
+            tello.send_rc_control(0, 0, 0, 0)
+            print(f"Kruis niet zichtbaar ({lost_frames}/{MAX_LOST_FRAMES}); beweging gepauzeerd.")
+            if lost_frames >= MAX_LOST_FRAMES:
+                print("Kruis te lang kwijt. Geen autonome landing uitgevoerd.")
+                return False
+            time.sleep(APPROACH_PAUSE_SECONDS)
+            continue
+
+        lost_frames = 0
+        center_x, center_y, area = marker
+        height, width = frame.shape[:2]
+        x_error = (center_x - width / 2) / width
+
+        # First align horizontally using very short sideways RC pulses.
+        if x_error < -CENTER_TOLERANCE:
+            tello.send_rc_control(-APPROACH_SPEED, 0, 0, 0)
+            print("Kruis links in beeld: kleine correctie naar links.")
+        elif x_error > CENTER_TOLERANCE:
+            tello.send_rc_control(APPROACH_SPEED, 0, 0, 0)
+            print("Kruis rechts in beeld: kleine correctie naar rechts.")
+        elif area >= LANDING_MARKER_AREA:
+            tello.send_rc_control(0, 0, 0, 0)
+            print(
+                "Kruis groot en horizontaal gecentreerd. "
+                "De beeldgrootte is slechts een ruwe aanwijzing; landen wordt geprobeerd."
+            )
+            time.sleep(0.5)
+            tello.land()
+            return True
+        else:
+            # Approach and descend together in short pulses. The marker is kept near
+            # the horizontal center; this does NOT prove the drone is over the X.
+            vertical = APPROACH_SPEED if center_y > height * 0.35 else 0
+            tello.send_rc_control(0, APPROACH_SPEED, -vertical, 0)
+            print("Kleine stap richting het kruis, met voorzichtige daling.")
+
+        time.sleep(APPROACH_PULSE_SECONDS)
+        tello.send_rc_control(0, 0, 0, 0)
+        time.sleep(APPROACH_PAUSE_SECONDS)
+
+    tello.send_rc_control(0, 0, 0, 0)
+    print("Maximale naderingtijd bereikt; autonome landing niet bevestigd.")
+    return False
 
 
 def main():
@@ -96,6 +177,7 @@ def main():
     connected = False
     airborne = False
     stream_started = False
+    landed = False
 
     try:
         print("Verbinding maken met TELLO-52D2C8...")
@@ -134,32 +216,38 @@ def main():
         time.sleep(HOVER_SECONDS)
 
         print("Dalen in stappen van 20 cm tot het gele kruis wordt herkend.")
-        print("Druk op Q in het cameravenster om de zoekactie af te breken.")
         marker = zoeken(tello, camera)
-        cv2.destroyAllWindows()
-
         if marker is None:
-            print("Geen geel kruis gevonden, of zoeken afgebroken. We landen op de huidige plek.")
+            print("Geen kruis gevonden of zoeken afgebroken. Er wordt op de huidige plek geland.")
             return
 
         print(
-            "Het gele kruis is zichtbaar, maar de camera kan niet bewijzen dat de drone "
-            "erboven hangt."
+            "Kruis herkend. Controleer dat de vliegzone vrij is en houd de drone in zicht. "
+            "De nadering is experimenteel."
         )
-        input(
-            "Controleer de positie en de vrije ruimte. Druk op Enter om de drone "
-            "op zijn huidige plek te laten landen: "
-        )
-        print("Landen...")
-        tello.land()
-        airborne = False
-        print("Test afgerond.")
+        akkoord = input("Typ NADER om de korte visuele nadering en landing te starten: ").strip()
+        if akkoord != "NADER":
+            print("Nadering afgebroken; er wordt op de huidige plek geland.")
+            return
+
+        landed = nader_en_landen(tello, camera)
+        if landed:
+            airborne = False
+            print("Landing-commando gegeven.")
+        else:
+            print("Automatische landing niet bevestigd. Er wordt op de huidige plek geland.")
+            tello.land()
+            airborne = False
 
     except KeyboardInterrupt:
         print("\nOnderbroken. Er wordt geprobeerd veilig te landen.")
     except Exception as exc:
         print(f"Fout tijdens de test: {exc}")
     finally:
+        try:
+            tello.send_rc_control(0, 0, 0, 0)
+        except Exception:
+            pass
         cv2.destroyAllWindows()
         if connected:
             if airborne:
