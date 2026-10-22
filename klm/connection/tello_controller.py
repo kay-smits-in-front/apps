@@ -27,6 +27,8 @@ def main():
     tello = Tello()
     connected = False
     flying = False
+    battery = None
+    last_battery_read = 0.0
 
     pygame.init()
     screen = pygame.display.set_mode((620, 260))
@@ -38,7 +40,9 @@ def main():
         print("Connecting to Tello. Make sure you are connected to TELLO-52D2C8...")
         tello.connect()
         connected = True
-        print(f"Connected. Battery: {tello.get_battery()}%")
+        battery = tello.get_battery()
+        last_battery_read = time.monotonic()
+        print(f"Connected. Battery: {battery}%")
         print("T = take off | SPACE = land | arrows = move | W/S = up/down")
         print("A/D = rotate | ESC = land if flying and quit")
         running = True
@@ -85,11 +89,18 @@ def main():
             if connected and flying:
                 tello.send_rc_control(left_right, forward_back, up_down, yaw)
 
+            if connected and time.monotonic() - last_battery_read >= 5:
+                try:
+                    battery = tello.get_battery()
+                    last_battery_read = time.monotonic()
+                except Exception:
+                    pass
+
             screen.fill((20, 27, 40))
             lines = [
                 "KLM · DJI Tello Controller",
                 f"Connection: {'connected' if connected else 'disconnected'}",
-                f"Battery: {tello.get_battery() if connected else '--'}%",
+                f"Battery: {battery if battery is not None else '--'}%",
                 f"Flight: {'AIRBORNE' if flying else 'LANDED'}",
                 "Arrows move · W/S altitude · A/D rotate",
                 "T takeoff (confirmation required) · SPACE land · ESC quit",
