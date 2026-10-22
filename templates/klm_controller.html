@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}DJI Controller · KLM{% endblock %}
+{% block content %}
+<a class="back-link" href="{{ url_for('klm_dashboard') }}">← Terug naar KLM</a>
+<div class="dashboard-head">
+  <div>
+    <div class="eyebrow"><span class="pulse"></span> KLM · STAP 1</div>
+    <h1>DJI <span style="color:var(--accent)">Controller</span></h1>
+    <p>De eerste werkplek voor de handmatige besturing van je Tello.</p>
+  </div>
+  <div class="date-pill"><span class="date-dot"></span> Lokale testomgeving</div>
+</div>
+<section class="auth-card" style="margin-bottom:22px">
+  <div class="eyebrow">VERBINDING</div>
+  <h2>DJI Tello · TELLO-52D2C8</h2>
+  <p class="muted">Verbind deze computer eerst handmatig met het wifi-netwerk van de drone. De drone hoeft nu nog niet online te zijn.</p>
+  <p class="muted">Wifi-netwerk: <code>TELLO-52D2C8</code></p>
+  <p class="muted">Deze pagina is voorlopig de controller-werkplek. Er worden nog geen vluchtcommando's verstuurd vanuit de browser.</p>
+</section>
+<section class="app-grid klm-grid">
+  <article class="app-card">
+    <div class="app-card-top"><div class="app-icon">⌘</div><span class="status"><span></span>Startpunt</span></div>
+    <h2>Python-controller</h2>
+    <p>De lokale Python-controller komt in <code>klm/connection/</code>. Hier bouwen we de verbinding en toetsenbesturing stap voor stap op.</p>
+    <div class="app-card-bottom"><span class="app-type">PYTHON · DJITELLOPY</span><span class="arrow">↗</span></div>
+  </article>
+  <article class="app-card">
+    <div class="app-card-top"><div class="app-icon">⚠</div><span class="status"><span></span>Veilig testen</span></div>
+    <h2>Eerst op de grond</h2>
+    <p>Test verbinding en status met de drone op een vrije, stabiele ondergrond. Propellers vrijhouden en nog niet opstijgen tijdens de eerste verbindingstest.</p>
+    <div class="app-card-bottom"><span class="app-type">VEILIGHEID</span><span class="arrow">○</span></div>
+  </article>
+</section>
+<section class="auth-card" style="margin-top:22px;margin-bottom:50px">
+  <div class="eyebrow">VOLGENDE EXPERIMENTEN</div>
+  <h2>We bouwen dit samen op</h2>
+  <p class="muted">Eerst verbinding en batterijstatus, daarna handmatige besturing met toetsen, vervolgens camerabeeld. Gezichts- en gebarenherkenning blijven aparte modules en krijgen nu nog geen controle over de drone.</p>
+  <p><a href="https://djitellopy.readthedocs.io/en/latest/" target="_blank" rel="noopener noreferrer">DJITelloPy-documentatie ↗</a></p>
+</section>
+{% endblock %}
