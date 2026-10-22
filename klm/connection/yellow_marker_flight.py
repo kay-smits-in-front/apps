@@ -1,123 +1,101 @@
-"""Eenvoudige Tello-test: camerabeeld vooraf controleren, opstijgen, vooruit, draaien en geel zoeken.
+"""Tello: live geelherkenning, opstijgen, 60 cm vooruit, draaien en dalen tot geel wordt gezien.
 
 Start vanuit de map apps:
     python klm/connection/yellow_marker_flight.py
 """
 
+import threading
 import time
 
 import cv2
-import numpy as np
 from djitellopy import Tello
-
 
 MIN_BATTERY = 40
 FORWARD_CM = 60
 DESCEND_STEP_CM = 20
-MAX_DESCENT_STEPS = 8
-YELLOW_MIN_AREA = 180
-
-
-def find_yellow_marker(frame):
-    """Herken een geel vlak in het RGB-camerabeeld."""
-    hsv = cv2.cvtColor(frame, cv2.COLOR_RGB2HSV)
-    display = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
-    mask = cv2.inRange(hsv, np.array((18, 70, 70)), np.array((40, 255, 255)))
-    mask = cv2.medianBlur(mask, 5)
-
-    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    geel = [contour for contour in contours if cv2.contourArea(contour) >= YELLOW_MIN_AREA]
-
-    if not geel:
-        return display, mask, False
-
-    grootste = max(geel, key=cv2.contourArea)
-    cv2.drawContours(display, [grootste], -1, (0, 255, 255), 2)
-    cv2.putText(display, "GEEL HERKEND", (10, 30), cv2.FONT_HERSHEY_SIMPLEX,
-                0.7, (0, 255, 255), 2)
-    return display, mask, True
-
-
-def toon_camera(camera):
-    """Toon live beeld en meld of geel zichtbaar is."""
-    frame = camera.frame
-    if frame is None:
-        return False
-
-    display, mask, geel = find_yellow_marker(frame.copy())
-    cv2.imshow("Tello - camera en gele marker (Q = stoppen)", display)
-    cv2.imshow("Geel masker", mask)
-    cv2.waitKey(1)
-    return geel
 
 
 tello = Tello()
-
 print("Verbinding maken met TELLO-52D2C8...")
 tello.connect()
-print(f"Batterij: {tello.get_battery()}%")
+battery = tello.get_battery()
+print(f"Batterij: {battery}%")
 
-if tello.get_battery() < MIN_BATTERY:
-    print(f"Stop: laad de batterij eerst op tot minstens {MIN_BATTERY}%.")
-else:
+if battery >= MIN_BATTERY:
     tello.streamon()
     camera = tello.get_frame_read()
+    geel_gevonden = threading.Event()
 
-    print("Controleer eerst het beeld terwijl de drone op de grond blijft.")
-    print("Geel moet zichtbaar zijn in het camerabeeld. Druk Q in het cameravenster om te stoppen.")
-    time.sleep(2)
+    def toon_live_beeld():
+        while not stop_beeld.is_set():
+            beeld = camera.frame
+            if beeld is None:
+                continue
 
-    beeld_ok = False
-    for _ in range(30):
-        beeld_ok = toon_camera(camera)
-        if cv2.waitKey(1) & 0xFF == ord("q"):
-            break
-        time.sleep(0.1)
+            # Zelfde RGB- en kleurherkenning als klm/vision/marker_test.py.
+            hsv = cv2.cvtColor(beeld, cv2.COLOR_RGB2HSV)
+            scherm = cv2.cvtColor(beeld, cv2.COLOR_RGB2BGR)
+            geel_masker = cv2.inRange(hsv, (18, 70, 70), (40, 255, 255))
+            geel_vormen, _ = cv2.findContours(
+                geel_masker, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+            )
 
-    if beeld_ok:
-        start = input("Geel wordt herkend. Maak de ruimte vrij en typ START: ").strip()
+            for vorm in geel_vormen:
+                if cv2.contourArea(vorm) > 100:
+                    x, y, w, h = cv2.boundingRect(vorm)
+                    cv2.rectangle(scherm, (x, y), (x + w, y + h), (0, 255, 255), 2)
+                    cv2.putText(
+                        scherm, "GEEL", (x, y - 5),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2
+                    )
+                    geel_gevonden.set()
 
-        if start == "START":
-            print("Opstijgen...")
-            tello.takeoff()
-            time.sleep(3)
+            cv2.imshow("Tello - live herkenning geel (Q = stoppen)", scherm)
+            cv2.imshow("Geel masker", geel_masker)
+            if cv2.waitKey(1) & 0xFF == ord("q"):
+                stop_beeld.set()
 
-            print(f"{FORWARD_CM} cm naar voren...")
-            tello.move_forward(FORWARD_CM)
-            time.sleep(3)
+    stop_beeld = threading.Event()
+    beeld_thread = threading.Thread(target=toon_live_beeld, daemon=True)
+    beeld_thread.start()
 
-            print("Even wachten voordat de drone draait...")
-            time.sleep(5)
-            print("180 graden draaien...")
-            tello.rotate_clockwise(180)
-            time.sleep(3)
+    print("Live camerabeeld gestart; geel hoeft nog niet zichtbaar te zijn.")
+    input("Leg de drone vlak neer, maak de ruimte vrij en druk Enter om op te stijgen: ")
 
-            print("Nu in stappen van 20 cm dalen tot geel wordt herkend.")
-            geel_gevonden = False
+    print("Opstijgen...")
+    tello.takeoff()
+    time.sleep(3)
 
-            for stap in range(MAX_DESCENT_STEPS):
-                if toon_camera(camera):
-                    print("Geel kruis herkend. Stoppen met zoeken.")
-                    geel_gevonden = True
-                    break
+    print(f"{FORWARD_CM} cm vooruit...")
+    tello.move_forward(FORWARD_CM)
+    time.sleep(4)
 
-                print(f"Dalen: stap {stap + 1}/{MAX_DESCENT_STEPS}, {DESCEND_STEP_CM} cm.")
-                tello.move_down(DESCEND_STEP_CM)
-                time.sleep(2)
+    print("Wachten tot de IMU stabiel is...")
+    time.sleep(5)
+    print("180 graden draaien...")
+    tello.rotate_clockwise(180)
+    time.sleep(3)
 
-            if geel_gevonden:
-                input("Controleer de positie. Druk op Enter om op de huidige plek te landen: ")
-            else:
-                print("Geel niet gevonden binnen de ingestelde zoekafstand.")
+    print("Dalen in stappen van 20 cm; live herkenning blijft draaien.")
+    while not geel_gevonden.is_set() and not stop_beeld.is_set():
+        print(f"{DESCEND_STEP_CM} cm dalen...")
+        tello.move_down(DESCEND_STEP_CM)
+        time.sleep(1)
 
-            tello.land()
-            print("Test afgerond.")
-        else:
-            print("Gestopt; de drone is niet opgestegen.")
+    tello.send_rc_control(0, 0, 0, 0)
+    if geel_gevonden.is_set():
+        print("Geel herkend. Stoppen met zoeken.")
     else:
-        print("Geel werd niet herkend in het camerabeeld. De drone blijft op de grond.")
+        print("Zoeken gestopt met Q.")
 
-    cv2.destroyAllWindows()
+    input("Controleer de situatie en druk op Enter om te landen: ")
+    tello.land()
+
+    stop_beeld.set()
+    beeld_thread.join()
     tello.streamoff()
-
-tello.end()
+    tello.end()
+    cv2.destroyAllWindows()
+else:
+    print(f"Niet opgestegen: minimaal {MIN_BATTERY}% batterij vereist.")
+    tello.end()
