@@ -1,4 +1,4 @@
-"""Supervised first flight: take off, move forward, turn, then find the yellow marker.
+"""Supervised first flight: take off, descend slightly, then look for the yellow marker.
 
 Run from the apps repository root:
     python -m klm.connection.yellow_marker_flight
@@ -6,7 +6,8 @@ Run from the apps repository root:
 Safety:
 - Start in a clear indoor area, with the yellow X visible on the floor.
 - This is an early vision test, not a guaranteed autonomous landing system.
-- The Tello's forward-facing camera cannot prove that it is directly above a floor marker.
+- The Tello's forward-facing camera may still not see a floor marker, even after descending.
+- This script does not move forward or rotate before searching.
 - The script stops for user confirmation before any marker-guided approach/landing.
 - Press Q in the camera window to abort; the script will attempt to land.
 """
@@ -19,7 +20,7 @@ from djitellopy import Tello
 
 
 MIN_BATTERY = 40
-FORWARD_CM = 30
+DESCEND_CM = 20
 HOVER_SECONDS = 2
 YELLOW_MIN_AREA = 180
 CAMERA_TIMEOUT_SECONDS = 10
@@ -147,12 +148,8 @@ def main():
         airborne = True
         time.sleep(HOVER_SECONDS)
 
-        print(f"{FORWARD_CM} cm naar voren...")
-        tello.move_forward(FORWARD_CM)
-        time.sleep(1)
-
-        print("180 graden draaien...")
-        tello.rotate_clockwise(180)
+        print(f"{DESCEND_CM} cm dalen om het vloergebied beter in beeld te krijgen...")
+        tello.move_down(DESCEND_CM)
         time.sleep(HOVER_SECONDS)
 
         print("Zoeken naar het gele kruis (maximaal 10 seconden).")
