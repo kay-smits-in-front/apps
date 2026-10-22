@@ -3,21 +3,19 @@
 {% block content %}
 <a class="back-link" href="{{ url_for('dashboard') }}">← Terug naar je apps</a>
 <div class="dashboard-head">
-  <div><div class="eyebrow"><span class="pulse"></span> DRONE WORKSPACE · BASIS</div><h1>KLM <span style="color:var(--accent)">/</span> Tello</h1><p>De centrale plek voor de DJI Tello, indoor mapping en AI-interactie.</p></div>
-  <div class="date-pill"><span class="date-dot"></span> Opzetfase · nog niet verbonden</div>
+  <div><div class="eyebrow"><span class="pulse"></span> DRONE WORKSPACE · STAP 1</div><h1>KLM <span style="color:var(--accent)">/</span> Tello</h1><p>We beginnen met één ding: de DJI Tello betrouwbaar handmatig besturen.</p></div>
+  <div class="date-pill"><span class="date-dot"></span> Lokale ontwikkeling</div>
 </div>
-<div class="section-label"><span>WERKRUIMTE</span><span class="section-count">BASIS · 00 ACTIEF</span></div>
+<div class="section-label"><span>WERKRUIMTE</span><span class="section-count">01 · ACTIEF ONDERDEEL</span></div>
 <section class="app-grid klm-grid">
-  <article class="app-card"><div class="app-card-top"><div class="app-icon">⌁</div><span class="status"><span></span>Voorbereid</span></div><h2>Droneverbinding</h2><p>Wi-Fi-verbinding met de Tello en later een statusoverzicht voor verbinding, batterij en vluchtstatus.</p><div class="app-card-bottom"><span class="app-type">WI-FI · SDK</span><span class="arrow">○</span></div></article>
-  <article class="app-card"><div class="app-card-top"><div class="app-icon">⌖</div><span class="status"><span></span>Gepland</span></div><h2>Indoor mapping</h2><p>Ruimtes verkennen en een kaart opbouwen uit camerabeelden en beschikbare vlucht-/bewegingsinformatie.</p><div class="app-card-bottom"><span class="app-type">CAMERA · MAPPING</span><span class="arrow">○</span></div></article>
-  <article class="app-card"><div class="app-card-top"><div class="app-icon">◎</div><span class="status"><span></span>Gepland</span></div><h2>Gezicht & volgen</h2><p>Later een AI-laag voor gezichtsdetectie en opt-in volgen, met duidelijke stop- en veiligheidsgrenzen.</p><div class="app-card-bottom"><span class="app-type">COMPUTER VISION</span><span class="arrow">○</span></div></article>
-  <article class="app-card"><div class="app-card-top"><div class="app-icon">✋</div><span class="status"><span></span>Gepland</span></div><h2>Handgebaren</h2><p>Een aparte herkenningsmodule voor gebaren, eerst alleen als visualisatie en later eventueel als bediening.</p><div class="app-card-bottom"><span class="app-type">GESTURE AI</span><span class="arrow">○</span></div></article>
-  <article class="app-card"><div class="app-card-top"><div class="app-icon">⌘</div><span class="status"><span></span>Gepland</span></div><h2>AI-orchestratie</h2><p>Voorbereide plek voor LangChain en een nog te kiezen lokale/remote vision- of taalmodelprovider. Geen model gekoppeld.</p><div class="app-card-bottom"><span class="app-type">LANGCHAIN · AI</span><span class="arrow">○</span></div></article>
-  <article class="app-card"><div class="app-card-top"><div class="app-icon">▦</div><span class="status"><span></span>Gepland</span></div><h2>Veiligheidsinstellingen</h2><p>Ruimte voor binnenvliegmodus, maximale afstand/hoogte, noodstop, propellerbescherming en een handmatige overname.</p><div class="app-card-bottom"><span class="app-type">SAFETY · CONTROLS</span><span class="arrow">○</span></div></article>
+  <a class="app-card app-card-link" href="{{ url_for('klm_controller') }}">
+    <div class="app-card-top"><div class="app-icon">⌘</div><span class="status"><span></span>Stap 1</span></div>
+    <h2>DJI Controller</h2><p>Begin met de wifi-verbinding, status en daarna handmatige besturing van de Tello.</p>
+    <div class="app-card-bottom"><span class="app-type">DJI TELLO · PYTHON</span><span class="arrow">↗</span></div>
+  </a>
 </section>
 <section class="auth-card" style="margin-top:22px;margin-bottom:50px">
-  <div class="eyebrow">ARCHITECTUUR</div><h2>Voorbereid, nog niet actief</h2>
-  <p class="muted">Dit is alleen de dashboard- en mappenstructuur. Er wordt nog geen verbinding gemaakt, geen camera gestart, geen AI aangeroepen en geen vliegcommando verstuurd.</p>
-  <p class="muted">Beoogde scheiding: <code>connection/</code> voor Wi-Fi/SDK, <code>vision/</code> voor camera en herkenning, <code>mapping/</code> voor kaartopbouw, <code>ai/</code> voor LangChain-integratie en <code>safety/</code> voor begrenzingen.</p>
+  <div class="eyebrow">LATER</div><h2>Beeldherkenning blijft apart</h2>
+  <p class="muted">Er staat alvast een basis klaar voor herkenning van jou en handgebaren. We voegen pas functies toe wanneer we samen besluiten wat we willen testen.</p>
 </section>
 {% endblock %}
