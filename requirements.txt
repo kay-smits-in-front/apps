@@ -11,3 +11,4 @@ gunicorn>=23.0,<24.0
 pytest>=8.3,<9.0
 yfinance>=0.2.65,<1.0
 djitellopy>=2.5.0,<3.0
+pygame>=2.6,<3.0
