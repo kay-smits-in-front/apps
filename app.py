@@ -319,6 +319,13 @@ def klm_dashboard():
     return render_template("klm_dashboard.html")
 
 
+@app.route("/apps/klm/controller")
+@login_required
+def klm_controller():
+    approved_user()
+    return render_template("klm_controller.html")
+
+
 @app.route("/apps/three-way")
 @login_required
 def three_way():
