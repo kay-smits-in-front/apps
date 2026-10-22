@@ -159,10 +159,10 @@ def main():
             "erboven hangt."
         )
         print("De drone blijft op zijn huidige hoogte; er wordt niet automatisch naar de vloer gevlogen.")
-        akkoord_landen = input(
-            "Controleer de positie en de vrije ruimte. Typ LAND om nu te landen, "
-            "of druk Enter om de drone op zijn huidige plek te laten landen: "
-        ).strip()
+        input(
+            "Controleer de positie en de vrije ruimte. Druk op Enter om de drone "
+            "op zijn huidige plek te laten landen: "
+        )
         print("Landen...")
         tello.land()
         airborne = False
