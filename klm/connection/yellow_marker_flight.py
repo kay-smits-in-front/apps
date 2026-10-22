@@ -1,4 +1,4 @@
-"""Supervised first flight: take off, descend slightly, then look for the yellow marker.
+"""Supervised first flight: take off, move forward, turn around, then descend until yellow is seen.
 
 Run from the apps repository root:
     python -m klm.connection.yellow_marker_flight
@@ -6,8 +6,8 @@ Run from the apps repository root:
 Safety:
 - Start in a clear indoor area, with the yellow X visible on the floor.
 - This is an early vision test, not a guaranteed autonomous landing system.
-- The Tello's forward-facing camera may still not see a floor marker, even after descending.
-- This script does not move forward or rotate before searching.
+- The Tello's forward-facing camera may still not see a floor marker.
+- Descent happens in small steps, stopping when yellow is detected or the safe search limit is reached.
 - The script stops for user confirmation before any marker-guided approach/landing.
 - Press Q in the camera window to abort; the script will attempt to land.
 """
@@ -20,10 +20,11 @@ from djitellopy import Tello
 
 
 MIN_BATTERY = 40
-DESCEND_CM = 20
+FORWARD_CM = 30
+DESCEND_STEP_CM = 20
+MAX_DESCENT_STEPS = 5
 HOVER_SECONDS = 2
 YELLOW_MIN_AREA = 180
-CAMERA_TIMEOUT_SECONDS = 10
 
 
 def find_yellow_marker(frame):
@@ -65,52 +66,28 @@ def find_yellow_marker(frame):
     return display, mask, (center_x, center_y, area)
 
 
-def zoeken(camera):
-    """Zoek maximaal 10 seconden naar geel en toon live camerabeeld.
+def zoeken(tello, camera):
+    """Descend 20 cm at a time until the yellow marker appears."""
+    for stap in range(MAX_DESCENT_STEPS):
+        print(f"Dalen: stap {stap + 1}/{MAX_DESCENT_STEPS} ({DESCEND_STEP_CM} cm)...")
+        tello.move_down(DESCEND_STEP_CM)
+        time.sleep(HOVER_SECONDS)
 
-    De zoekbewegingen (omhoog/omlaag en links/rechts) voegen we later toe,
-    zodra we weten dat de marker in het camerabeeld betrouwbaar wordt herkend.
-    """
-    start_time = time.monotonic()
-
-    while time.monotonic() - start_time < CAMERA_TIMEOUT_SECONDS:
+        # After each small descent, check the live image for the yellow marker.
         frame = camera.frame
         if frame is None:
-            time.sleep(0.1)
             continue
 
         display, mask, marker = find_yellow_marker(frame.copy())
-        if marker:
-            cv2.putText(
-                display,
-                "GEEL GEVONDEN - positie nog niet bevestigd",
-                (10, 60),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.5,
-                (0, 255, 255),
-                2,
-            )
-        else:
-            cv2.putText(
-                display,
-                "10 seconden zoeken naar geel...",
-                (10, 30),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                0.6,
-                (255, 255, 255),
-                2,
-            )
-
         cv2.imshow("Tello - gele marker", display)
         cv2.imshow("Geel masker", mask)
-
-        if cv2.waitKey(1) & 0xFF == ord("q"):
-            print("Zoeken afgebroken via Q.")
-            return None
+        cv2.waitKey(1)
 
         if marker:
+            print("Geel kruis gevonden!")
             return marker
 
+    print("Gele kruis niet gevonden binnen de ingestelde daalafstand.")
     return None
 
 
@@ -148,12 +125,17 @@ def main():
         airborne = True
         time.sleep(HOVER_SECONDS)
 
-        print(f"{DESCEND_CM} cm dalen om het vloergebied beter in beeld te krijgen...")
-        tello.move_down(DESCEND_CM)
+        print(f"{FORWARD_CM} cm naar voren...")
+        tello.move_forward(FORWARD_CM)
+        time.sleep(1)
+
+        print("180 graden draaien...")
+        tello.rotate_clockwise(180)
         time.sleep(HOVER_SECONDS)
 
-        print("Zoeken naar het gele kruis (maximaal 10 seconden).")
-        marker = zoeken(camera)
+        print("Dalen in stappen van 20 cm tot het gele kruis wordt herkend.")
+        print("Druk op Q in het cameravenster om de zoekactie af te breken.")
+        marker = zoeken(tello, camera)
         cv2.destroyAllWindows()
 
         if marker is None:
