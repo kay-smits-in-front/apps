@@ -22,7 +22,7 @@ MIN_BATTERY = 40
 FORWARD_CM = 30
 HOVER_SECONDS = 2
 YELLOW_MIN_AREA = 180
-CAMERA_TIMEOUT_SECONDS = 20
+CAMERA_TIMEOUT_SECONDS = 10
 
 
 def find_yellow_marker(frame):
@@ -62,6 +62,55 @@ def find_yellow_marker(frame):
         2,
     )
     return display, mask, (center_x, center_y, area)
+
+
+def zoeken(camera):
+    """Zoek maximaal 10 seconden naar geel en toon live camerabeeld.
+
+    De zoekbewegingen (omhoog/omlaag en links/rechts) voegen we later toe,
+    zodra we weten dat de marker in het camerabeeld betrouwbaar wordt herkend.
+    """
+    start_time = time.monotonic()
+
+    while time.monotonic() - start_time < CAMERA_TIMEOUT_SECONDS:
+        frame = camera.frame
+        if frame is None:
+            time.sleep(0.1)
+            continue
+
+        display, mask, marker = find_yellow_marker(frame.copy())
+        if marker:
+            cv2.putText(
+                display,
+                "GEEL GEVONDEN - positie nog niet bevestigd",
+                (10, 60),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.5,
+                (0, 255, 255),
+                2,
+            )
+        else:
+            cv2.putText(
+                display,
+                "10 seconden zoeken naar geel...",
+                (10, 30),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.6,
+                (255, 255, 255),
+                2,
+            )
+
+        cv2.imshow("Tello - gele marker", display)
+        cv2.imshow("Geel masker", mask)
+
+        if cv2.waitKey(1) & 0xFF == ord("q"):
+            print("Zoeken afgebroken via Q.")
+            return None
+
+        if marker:
+            return marker
+
+    return None
 
 
 def main():
@@ -106,59 +155,18 @@ def main():
         tello.rotate_clockwise(180)
         time.sleep(HOVER_SECONDS)
 
-        print("Camera zoeken naar het gele kruis. Druk Q in het cameravenster om af te breken.")
-        start_time = time.monotonic()
-        marker_seen = False
-
-        while time.monotonic() - start_time < CAMERA_TIMEOUT_SECONDS:
-            frame = camera.frame
-            if frame is None:
-                time.sleep(0.1)
-                continue
-
-            display, mask, marker = find_yellow_marker(frame.copy())
-            if marker:
-                marker_seen = True
-                cv2.putText(
-                    display,
-                    "Kruis gevonden - nog NIET automatisch landen",
-                    (10, 60),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.5,
-                    (0, 255, 255),
-                    2,
-                )
-            else:
-                cv2.putText(
-                    display,
-                    "Zoeken naar geel...",
-                    (10, 30),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.6,
-                    (255, 255, 255),
-                    2,
-                )
-
-            cv2.imshow("Tello - gele marker", display)
-            cv2.imshow("Geel masker", mask)
-            key = cv2.waitKey(1) & 0xFF
-            if key == ord("q"):
-                print("Afgebroken via Q.")
-                return
-            if marker_seen:
-                break
-
+        print("Zoeken naar het gele kruis (maximaal 10 seconden).")
+        marker = zoeken(camera)
         cv2.destroyAllWindows()
 
-        if not marker_seen:
-            print("Geen geel kruis gevonden binnen de zoektijd. We landen op de huidige plek.")
+        if marker is None:
+            print("Geen geel kruis gevonden, of zoeken afgebroken. We landen op de huidige plek.")
             return
 
         print(
             "Het gele kruis is zichtbaar, maar de camera kan niet bewijzen dat de drone "
             "erboven hangt."
         )
-        print("De drone blijft op zijn huidige hoogte; er wordt niet automatisch naar de vloer gevlogen.")
         input(
             "Controleer de positie en de vrije ruimte. Druk op Enter om de drone "
             "op zijn huidige plek te laten landen: "
