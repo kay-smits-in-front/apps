@@ -14,7 +14,7 @@ def main() -> None:
         vlucht.opstijgen()
         vlucht.vooruit()
         vlucht.draai(180)
-        vlucht.zoek_door_dalen(vind_geel)
+        vlucht.zoek_door_vegen(vind_geel)
         vlucht.vlieg_en_land(vind_geel)
 
 

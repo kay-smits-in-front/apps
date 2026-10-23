@@ -12,6 +12,9 @@ KP_HOOGTE = 60.0
 VOORUIT_SNEL = 15
 ZOEK_DAAL = -12
 MAX_RC = 100
+ZWEEP_PERIODE_S = 6.0
+ZWEEP_LR = 20
+ZWEEP_FB = 6
 
 
 class Rc(NamedTuple):
@@ -66,3 +69,9 @@ def corrigeer(rc: Rc, vx: float, vy: float) -> Rc:
     """Demp alleen de assen waarop we niets bewust commanderen."""
     d = demping(vx, vy)
     return Rc(rc.lr or d.lr, rc.fb or d.fb, rc.ud, rc.yaw)
+
+
+def zoek_vegen(t: float) -> Rc:
+    """Zoeken: langzaam vooruit en links-rechts zwaaien (sinus over de tijd t in seconden)."""
+    lr = int(ZWEEP_LR * np.sin(2 * np.pi * t / ZWEEP_PERIODE_S))
+    return Rc(lr, ZWEEP_FB, 0, 0)

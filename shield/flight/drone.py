@@ -9,7 +9,7 @@ from typing import Callable, Iterator
 import numpy as np
 from djitellopy import Tello, TelloException
 
-from shield.flight.sturing import STIL, Rc, corrigeer, naar_marker, zoek_dalen, zoek_draaien
+from shield.flight.sturing import STIL, Rc, corrigeer, naar_marker, zoek_dalen, zoek_draaien, zoek_vegen
 from shield.vision.live import LiveBeeld
 from shield.vision.markers import Marker
 
@@ -131,27 +131,39 @@ class Vlucht:
             time.sleep(0.05)
         self.houd(STIL, 1.0)
 
-    def zoek_marker(self, zoeker: Zoeker, zoek_actie: Callable[[], Rc], timeout_s: float) -> Marker:
-        """Voer zoek_actie uit tot de marker zichtbaar is. Faalt na timeout of te lage hoogte."""
-        self.nieuw_nulpunt(MAX_AFWIJKING_CM)
-        einde = time.monotonic() + timeout_s
-        while time.monotonic() < einde:
+    def zoek_marker(
+        self,
+        zoeker: Zoeker,
+        zoek_actie: Callable[[float], Rc],
+        timeout_s: float,
+        max_afwijking: float | None = MAX_AFWIJKING_CM,
+        min_hoogte: float = 0.0,
+    ) -> Marker:
+        """Voer zoek_actie(t) uit tot de marker zichtbaar is. Faalt na timeout of te lage hoogte."""
+        self.nieuw_nulpunt(max_afwijking)
+        start = time.monotonic()
+        while (t := time.monotonic() - start) < timeout_s:
             if (marker := zoeker(self.camera.frame)) is not None:
                 self.stuur(STIL)
                 return marker
-            if self.tello.get_height() < MIN_HOOGTE_CM:
+            if min_hoogte and self.tello.get_height() < min_hoogte:
                 break
-            self.stuur(zoek_actie())
+            self.stuur(zoek_actie(t))
             time.sleep(LOOP_TIJD_S)
         raise Noodstop("Marker niet gevonden.")
 
     def zoek_door_dalen(self, zoeker: Zoeker, timeout_s: float = 20) -> Marker:
         stap("zoeken door dalen")
-        return self.zoek_marker(zoeker, zoek_dalen, timeout_s)
+        return self.zoek_marker(zoeker, lambda t: zoek_dalen(), timeout_s, min_hoogte=MIN_HOOGTE_CM)
 
     def zoek_door_draaien(self, zoeker: Zoeker, timeout_s: float = 25) -> Marker:
         stap("zoeken door draaien")
-        return self.zoek_marker(zoeker, zoek_draaien, timeout_s)
+        return self.zoek_marker(zoeker, lambda t: zoek_draaien(), timeout_s)
+
+    def zoek_door_vegen(self, zoeker: Zoeker, timeout_s: float = 10) -> Marker:
+        """Vooruit en links-rechts zwaaien; ~10 s bij rc 6 is ruim een meter vooruit."""
+        stap("zoeken door vegen")
+        return self.zoek_marker(zoeker, zoek_vegen, timeout_s, max_afwijking=None)
 
     def vlieg_en_land(self, zoeker: Zoeker, timeout_s: float = 30) -> None:
         """Volg de marker; zodra hij laag in beeld is of onderin verdwijnt: laatste stuk en landen."""
