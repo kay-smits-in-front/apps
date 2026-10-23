@@ -45,10 +45,12 @@ def samenvatting(metingen: np.ndarray) -> str:
 def main() -> None:
     with vlucht_met_camera() as vlucht:
         input("Open ruimte, gordijn weg, drone op de vloer. Enter = opstijgen: ")
+        print("grond:", vlucht.tello.get_current_state())
         vlucht.tello.takeoff()
         metingen = zweef_en_meet(vlucht.tello, ZWEEF_S)
         np.savetxt(PAD, metingen, delimiter=",", header="t," + ",".join(VELDEN), comments="")
         print(samenvatting(metingen))
+        print("lucht:", vlucht.tello.get_current_state())
 
 
 if __name__ == "__main__":
