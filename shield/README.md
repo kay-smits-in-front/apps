@@ -1,10 +1,15 @@
-# KLM — DJI Tello workspace
+# SHIELD — DJI Tello workspace
 
-KLM is de voorbereidende projectmap voor een DJI/Ryze Tello-drone-app binnen de privéportal `apps`.
+SHIELD is de voorbereidende projectmap voor een DJI/Ryze Tello-drone-app binnen de privéportal `apps`.
 
 ## Status
 
-**Alleen structuur en dashboard.** Er is nog geen drone-controlcode, Wi-Fi-socket, cameraverwerking, modelintegratie of vluchtactie geïmplementeerd.
+Eerste autonome vliegtests voor het gele en groene landingskruis:
+
+- `python -m shield.flight.test_1` — opstijgen van geel, 1 m vooruit, 180° draaien, landen op geel
+- `python -m shield.flight.test_2` — opstijgen van geel, groen zoeken, erheen vliegen en landen
+
+Herkenning: `vision/markers.py`. Sturing (pure functies): `flight/sturing.py`. Vluchtstappen: `flight/drone.py`.
 
 ## Beoogde structuur
 

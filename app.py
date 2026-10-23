@@ -302,8 +302,8 @@ def dashboard():
     apps = [
         {"name": "Three Way", "description": "Beleggingsanalyse en portefeuille-inzichten.",
          "status": "Lokaal", "icon": "↗", "url": url_for("three_way_dashboard")},
-        {"name": "KLM", "description": "Basisdashboard voor de DJI Tello: verkenning, mapping en AI-interactie.",
-         "status": "Opzet", "icon": "⌁", "url": url_for("klm_dashboard")},
+        {"name": "SHIELD", "description": "Basisdashboard voor de DJI Tello: verkenning, mapping en AI-interactie.",
+         "status": "Opzet", "icon": "⌁", "url": url_for("shield_dashboard")},
         {"name": "AI-LAB", "description": "Modellen vanaf nul bouwen en streng toetsen. Three Way is het eerste onderwerp.",
          "status": "Lokaal", "icon": "✦", "url": url_for("ai_lab")},
         {"name": "Thinkwave", "description": "Open de Thinkwave-ervaring vanuit je persoonlijke app-portaal.",
@@ -312,18 +312,18 @@ def dashboard():
     return render_template("dashboard.html", apps=apps)
 
 
-@app.route("/apps/klm")
+@app.route("/apps/shield")
 @login_required
-def klm_dashboard():
+def shield_dashboard():
     approved_user()
-    return render_template("klm_dashboard.html")
+    return render_template("shield_dashboard.html")
 
 
-@app.route("/apps/klm/controller")
+@app.route("/apps/shield/tests")
 @login_required
-def klm_controller():
+def shield_tests():
     approved_user()
-    return render_template("klm_controller.html")
+    return render_template("shield_tests.html")
 
 
 @app.route("/apps/three-way")

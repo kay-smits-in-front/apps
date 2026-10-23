@@ -522,4 +522,4 @@ def test_ai_runs_lists_newest_first_and_portal_keeps_every_app(client, tmp_path)
     assert app_module.app.test_client().get("/apps/ai-lab").status_code == 302
     assert client.get("/apps/ai-lab").status_code == 200
     page = client.get("/dashboard").data
-    assert all(name in page for name in (b"Three Way", b"KLM", b"AI-LAB", b"Thinkwave"))
+    assert all(name in page for name in (b"Three Way", b"SHIELD", b"AI-LAB", b"Thinkwave"))

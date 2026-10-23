@@ -6,4 +6,4 @@ No camera is opened and no recognition is performed yet.
 
 def recognize_person(frame):
     """Return a future recognition result for a frame; currently not implemented."""
-    raise NotImplementedError("Face recognition is a future KLM experiment.")
+    raise NotImplementedError("Face recognition is a future SHIELD experiment.")

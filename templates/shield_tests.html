@@ -1,12 +1,12 @@
 {% extends "base.html" %}
-{% block title %}DJI Controller · KLM{% endblock %}
+{% block title %}Vliegtests · SHIELD{% endblock %}
 {% block content %}
-<a class="back-link" href="{{ url_for('klm_dashboard') }}">← Terug naar KLM</a>
+<a class="back-link" href="{{ url_for('shield_dashboard') }}">← Terug naar SHIELD</a>
 <div class="dashboard-head">
   <div>
-    <div class="eyebrow"><span class="pulse"></span> KLM · STAP 1</div>
-    <h1>DJI <span style="color:var(--accent)">Controller</span></h1>
-    <p>De eerste werkplek voor de handmatige besturing van je Tello.</p>
+    <div class="eyebrow"><span class="pulse"></span> SHIELD · STAP 1</div>
+    <h1>Autonome <span style="color:var(--accent)">vliegtests</span></h1>
+    <p>Geel en groen landingskruis: opstijgen, zoeken, landen.</p>
   </div>
   <div class="date-pill"><span class="date-dot"></span> Lokale testomgeving</div>
 </div>
@@ -17,11 +17,11 @@
   <p class="muted">Wifi-netwerk: <code>TELLO-52D2C8</code></p>
   <p class="muted">De besturing draait bewust als lokaal Python-programma op deze computer, niet in de browser of op Render. De browserpagina geeft uitleg; de toetsencontroller stuurt de drone aan.</p>
 </section>
-<section class="app-grid klm-grid">
+<section class="app-grid shield-grid">
   <article class="app-card">
     <div class="app-card-top"><div class="app-icon">⌘</div><span class="status"><span></span>Startpunt</span></div>
-    <h2>Python-controller</h2>
-    <p>De lokale toetsencontroller staat in <code>klm/connection/tello_controller.py</code>. Start hem vanuit de projectroot met <code>python -m klm.connection.tello_controller</code>.</p>
+    <h2>test_1 en test_2</h2>
+    <p>Start vanuit de projectroot met <code>python -m shield.flight.test_1</code> (opstijgen, landen op geel) of <code>python -m shield.flight.test_2</code> (van geel naar groen).</p>
     <div class="app-card-bottom"><span class="app-type">PYTHON · DJITELLOPY</span><span class="arrow">↗</span></div>
   </article>
   <article class="app-card">

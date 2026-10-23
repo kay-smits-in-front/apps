@@ -1,16 +1,16 @@
 {% extends "base.html" %}
-{% block title %}KLM · DJI Tello{% endblock %}
+{% block title %}SHIELD · DJI Tello{% endblock %}
 {% block content %}
 <a class="back-link" href="{{ url_for('dashboard') }}">← Terug naar je apps</a>
 <div class="dashboard-head">
-  <div><div class="eyebrow"><span class="pulse"></span> DRONE WORKSPACE · STAP 1</div><h1>KLM <span style="color:var(--accent)">/</span> Tello</h1><p>We beginnen met één ding: de DJI Tello betrouwbaar handmatig besturen.</p></div>
+  <div><div class="eyebrow"><span class="pulse"></span> DRONE WORKSPACE · STAP 1</div><h1>SHIELD <span style="color:var(--accent)">/</span> Tello</h1><p>Autonoom vliegen met de DJI Tello.</p></div>
   <div class="date-pill"><span class="date-dot"></span> Lokale ontwikkeling</div>
 </div>
 <div class="section-label"><span>WERKRUIMTE</span><span class="section-count">01 · ACTIEF ONDERDEEL</span></div>
-<section class="app-grid klm-grid">
-  <a class="app-card app-card-link" href="{{ url_for('klm_controller') }}">
+<section class="app-grid shield-grid">
+  <a class="app-card app-card-link" href="{{ url_for('shield_tests') }}">
     <div class="app-card-top"><div class="app-icon">⌘</div><span class="status"><span></span>Stap 1</span></div>
-    <h2>DJI Controller</h2><p>Begin met de wifi-verbinding, status en daarna handmatige besturing van de Tello.</p>
+    <h2>Vliegtests</h2><p>Autonoom opstijgen en landen op het gele en groene kruis.</p>
     <div class="app-card-bottom"><span class="app-type">DJI TELLO · PYTHON</span><span class="arrow">↗</span></div>
   </a>
 </section>

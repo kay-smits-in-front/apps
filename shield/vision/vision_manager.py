@@ -1,7 +1,7 @@
 """Future coordinator for person and hand-gesture recognition."""
 
-from klm.vision.face_recognition import recognize_person
-from klm.vision.gesture_recognition import recognize_gesture
+from shield.vision.face_recognition import recognize_person
+from shield.vision.gesture_recognition import recognize_gesture
 
 
 def analyze_frame(frame):
