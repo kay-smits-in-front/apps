@@ -16,12 +16,52 @@ LOOP_TIJD_S = 0.03  # ~30 Hz; de camera levert maar ~30 fps.
 LANDEN_Y = 0.75  # Marker zo laag in beeld: bijna boven de marker.
 LAATSTE_METERS_CM = 20  # Blind vooruit als de marker onder de camera verdwijnt.
 
+STABILISEER_S = 4.0  # Na opstijgen: IMU en hoogte laten settelen.
+VOORUIT_RC = 40
+VOORUIT_S = 2.5  # Tuneren: ~1 m vooruit bij VOORUIT_RC.
+START = time.monotonic()
+
 Zoeker = Callable[[np.ndarray], Marker | None]
+
+
+def stap(naam: str) -> None:
+    """Eén regel per vluchtstap, met tijd sinds start."""
+    print(f"[{time.monotonic() - START:5.1f}s] {naam}")
+
+
+def houd_rc(tello: Tello, rc: Rc, seconden: float) -> None:
+    """Stuur rc-commando's 20x per seconde. Niet-blokkerend alternatief voor move_*."""
+    einde = time.monotonic() + seconden
+    while time.monotonic() < einde:
+        tello.send_rc_control(*rc)
+        time.sleep(0.05)
+    tello.send_rc_control(*STIL)
+
+
+def opstijgen(tello: Tello) -> None:
+    """Opstijgen en actief stil hangen, zodat de drone settelt."""
+    stap("opstijgen")
+    tello.takeoff()
+    stap("stabiliseren")
+    houd_rc(tello, STIL, STABILISEER_S)
+
+
+def vooruit(tello: Tello) -> None:
+    stap("vooruit")
+    houd_rc(tello, Rc(0, VOORUIT_RC, 0, 0), VOORUIT_S)
+    houd_rc(tello, STIL, 1.0)
+
+
+def draai_180(tello: Tello) -> None:
+    stap("draaien 180")
+    tello.rotate_clockwise(180)
+    houd_rc(tello, STIL, 1.0)
 
 
 @contextmanager
 def drone_met_camera() -> Iterator[tuple[Tello, object]]:
     """Verbind, zet de camera aan voor het opstijgen en land altijd bij een fout."""
+    Tello.RESPONSE_TIMEOUT = 3  # Standaard 7 s x 3 pogingen: een mislukt commando hing 20+ s.
     tello = Tello()
     tello.connect()
     if tello.get_battery() < MIN_BATTERIJ:
@@ -88,6 +128,6 @@ def vlieg_en_land(tello: Tello, camera, zoeker: Zoeker, timeout_s: float = 30) -
     else:
         stuur(tello, STIL)
         raise TimeoutError("Niet op tijd bij de marker.")
-    stuur(tello, STIL)
-    tello.move_forward(LAATSTE_METERS_CM)
+    stap("laatste stuk en landen")
+    houd_rc(tello, Rc(0, VOORUIT_RC, 0, 0), LAATSTE_METERS_CM / 100)
     tello.land()
