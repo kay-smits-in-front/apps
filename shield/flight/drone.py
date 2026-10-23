@@ -10,6 +10,7 @@ import numpy as np
 from djitellopy import Tello, TelloException
 
 from shield.flight.sturing import STIL, Rc, corrigeer, naar_marker, zoek_dalen, zoek_draaien
+from shield.vision.live import LiveBeeld
 from shield.vision.markers import Marker
 
 MIN_BATTERIJ = 40
@@ -18,8 +19,8 @@ LOOP_TIJD_S = 0.03
 LANDEN_Y = 0.75
 LAATSTE_METERS_CM = 20
 STABILISEER_S = 4.0
-VOORUIT_RC = 40
-VOORUIT_S = 2.5
+VOORUIT_RC = 20  # Was 40 x 2.5 s: te ver en te hard.
+VOORUIT_S = 2.0
 OMHOOG_RC = 40
 
 MAX_AFWIJKING_CM = 30  # Noodstop als de drone verder dan dit van het nulpunt raakt.
@@ -191,7 +192,7 @@ def landen(tello: Tello) -> None:
 
 
 @contextmanager
-def vlucht_met_camera() -> Iterator[Vlucht]:
+def vlucht_met_camera(toon_beeld: bool = True) -> Iterator[Vlucht]:
     """Verbind, zet de camera aan voor het opstijgen en land altijd, ook bij een noodstop."""
     logging.getLogger("djitellopy").setLevel(logging.WARNING)  # Elke rc-regel printen vertraagt.
     Tello.RESPONSE_TIMEOUT = 3
@@ -204,11 +205,16 @@ def vlucht_met_camera() -> Iterator[Vlucht]:
     camera = tello.get_frame_read()
     while camera.frame is None or not camera.frame.any():
         time.sleep(0.05)
+    live = LiveBeeld(camera) if toon_beeld else None
+    if live:
+        live.start()
     try:
         yield Vlucht(tello, camera)
     except Noodstop as reden:
         print(f"NOODSTOP: {reden}")
     finally:
         landen(tello)
+        if live:
+            live.sluit()
         tello.streamoff()
         tello.end()

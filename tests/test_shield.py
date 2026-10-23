@@ -1,3 +1,4 @@
+import cv2
 import numpy as np
 
 from shield.flight.sturing import DOEL_Y, naar_marker
@@ -82,3 +83,13 @@ def test_draai_180_stopt_en_stuurt_alleen_yaw():
 def test_demping_alleen_op_assen_zonder_commando():
     assert corrigeer(Rc(0, 40, 0, 0), vx=3, vy=0).fb == 40
     assert corrigeer(Rc(0, 0, 0, 0), vx=0, vy=2).lr != 0
+
+
+def test_live_beeld_tekent_herkend_geel():
+    from shield.vision.live import teken
+
+    frame = frame_met_blok((255, 230, 0), 300, 400)
+    zonder = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+    met = teken(frame)
+    assert met.shape == zonder.shape and (met != zonder).any()
+    assert (teken(np.zeros_like(frame)) == 0).all()
