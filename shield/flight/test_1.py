@@ -4,22 +4,18 @@ Start vanuit de projectroot:
     python -m shield.flight.test_1
 """
 
-from shield.flight.drone import (
-    draai_180, drone_met_camera, opstijgen, stap, vlieg_en_land, vooruit, zoek_door_dalen,
-)
+from shield.flight.drone import vlucht_met_camera
 from shield.vision.markers import vind_geel
 
 
 def main() -> None:
-    with drone_met_camera() as (tello, camera):
+    with vlucht_met_camera() as vlucht:
         input("Zet de drone op het gele kruis, ruimte vrij. Enter = opstijgen: ")
-        opstijgen(tello)
-        vooruit(tello)
-        draai_180(tello)
-        stap("zoeken door dalen")
-        zoek_door_dalen(tello, camera, vind_geel)
-        stap("geel gezien: naar het kruis")
-        vlieg_en_land(tello, camera, vind_geel)
+        vlucht.opstijgen()
+        vlucht.vooruit()
+        vlucht.draai(180)
+        vlucht.zoek_door_dalen(vind_geel)
+        vlucht.vlieg_en_land(vind_geel)
 
 
 if __name__ == "__main__":

@@ -25,6 +25,13 @@ class Rc(NamedTuple):
 
 STIL = Rc(0, 0, 0, 0)
 
+# Drift-demping: tegenstuur op de gemeten snelheid. Het teken hangt af van de assen van de
+# Tello; klopt het niet (drone drijft harder weg), draai dan TEKEN_FB of TEKEN_LR om.
+KP_DEMP = 5.0
+MAX_DEMP = 25
+TEKEN_FB = -1
+TEKEN_LR = 1
+
 
 def begrens(waarde: float) -> int:
     return int(np.clip(waarde, -MAX_RC, MAX_RC))
@@ -46,3 +53,16 @@ def zoek_dalen() -> Rc:
 def zoek_draaien(snelheid: int = 25) -> Rc:
     """Marker nog niet zichtbaar: langzaam om de eigen as draaien."""
     return Rc(0, 0, 0, snelheid)
+
+
+def demping(vx: float, vy: float) -> Rc:
+    """Tegenstuurcommando om de gemeten snelheid (vx voor/achter, vy zijwaarts) af te remmen."""
+    lr = int(np.clip(TEKEN_LR * KP_DEMP * vy, -MAX_DEMP, MAX_DEMP))
+    fb = int(np.clip(TEKEN_FB * KP_DEMP * vx, -MAX_DEMP, MAX_DEMP))
+    return Rc(lr, fb, 0, 0)
+
+
+def corrigeer(rc: Rc, vx: float, vy: float) -> Rc:
+    """Demp alleen de assen waarop we niets bewust commanderen."""
+    d = demping(vx, vy)
+    return Rc(rc.lr or d.lr, rc.fb or d.fb, rc.ud, rc.yaw)
