@@ -180,19 +180,21 @@ class Vlucht:
         start = time.monotonic()
         laatste: Marker | None = None
         dichtbij = kwijt = 0
+        rc = STIL
         while time.monotonic() - start < timeout_s:
             marker = zoeker(self.camera.frame)
             if marker is None:
                 kwijt, dichtbij = kwijt + 1, 0
                 if kwijt >= KWIJT_FRAMES and laatste is not None and laatste.y > LANDEN_Y - 0.15:
                     break
-                self.stuur(STIL)
+                self.stuur(rc if kwijt < KWIJT_FRAMES else STIL)  # Kort kwijt: koers houden.
             else:
                 kwijt, laatste = 0, marker
                 dichtbij = dichtbij + 1 if marker.y > LANDEN_Y else 0
                 if dichtbij >= BEVESTIG_FRAMES:
                     break
-                self.stuur(naar_marker(marker))
+                rc = naar_marker(marker)
+                self.stuur(rc)
             time.sleep(LOOP_TIJD_S)
         else:
             raise Noodstop("Niet op tijd bij de marker.")

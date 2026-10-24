@@ -153,3 +153,19 @@ def test_q_stopt_de_vlucht_direct():
     vlucht.stop.set()
     with pytest.raises(Noodstop):
         vlucht.stuur(STIL)
+
+
+def test_marker_even_kwijt_houdt_koers():
+    class Camera:
+        frames = iter([frame_met_blok((255, 230, 0), 300, 420)] * 3)
+        leeg = np.zeros((720, 960, 3), dtype=np.uint8)
+
+        @property
+        def frame(self):
+            return next(self.frames, self.leeg)
+
+    vlucht = Vlucht(NepTello(), camera=Camera())
+    with pytest.raises(Noodstop):
+        vlucht.vlieg_en_land(vind_geel, timeout_s=0.3)
+    fb = [c[1] for c in vlucht.tello.commandos]
+    assert fb[:6].count(0) == 0  # Eerste commando's blijven vooruit, ook na het kwijtraken.
