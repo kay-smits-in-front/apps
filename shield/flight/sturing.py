@@ -12,9 +12,12 @@ KP_HOOGTE = 60.0
 VOORUIT_SNEL = 15
 ZOEK_DAAL = -12
 MAX_RC = 100
-ZWEEP_PERIODE_S = 6.0
-ZWEEP_LR = 20
-ZWEEP_FB = 6
+# Zoeken in een vierkant: links-rechts zigzaggen terwijl hij langzaam daalt. Tijdgestuurd, want
+# de hoogtemeting is onbetrouwbaar. Zijwaartse reikwijdte ~ ZIG_LR x ZIG_PERIODE_S.
+ZIG_PERIODE_S = 6.0
+ZIG_LR = 20
+ZIG_DAAL = -10
+ZIG_DAAL_S = 3.0  # Zo lang dalen; daarna alleen links-rechts op de lagere hoogte.
 
 
 class Rc(NamedTuple):
@@ -71,7 +74,8 @@ def corrigeer(rc: Rc, vx: float, vy: float) -> Rc:
     return Rc(rc.lr or d.lr, rc.fb or d.fb, rc.ud, rc.yaw)
 
 
-def zoek_vegen(t: float) -> Rc:
-    """Zoeken: langzaam vooruit en links-rechts zwaaien (sinus over de tijd t in seconden)."""
-    lr = int(ZWEEP_LR * np.sin(2 * np.pi * t / ZWEEP_PERIODE_S))
-    return Rc(lr, ZWEEP_FB, 0, 0)
+def zoek_zigzag(t: float) -> Rc:
+    """Zoeken: eerst naar links, dan rechts, enz. (gecentreerd om de start), met langzaam dalen."""
+    lr = int(-ZIG_LR * np.cos(2 * np.pi * t / ZIG_PERIODE_S))
+    ud = ZIG_DAAL if t < ZIG_DAAL_S else 0
+    return Rc(lr, 0, ud, 0)

@@ -15,7 +15,7 @@ def plan(vlucht: Vlucht) -> None:
     vlucht.opstijgen()
     vlucht.vooruit()
     vlucht.draai(180)
-    vlucht.zoek_door_vegen(vind_geel)
+    vlucht.zoek_door_zigzag(vind_geel)
     vlucht.vlieg_en_land(vind_geel)
 
 

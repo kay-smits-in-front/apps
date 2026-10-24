@@ -96,30 +96,30 @@ def test_live_beeld_tekent_herkend_geel():
     assert (teken(np.zeros_like(frame)) == 0).all()
 
 
-def test_zoek_vegen_zwaait_links_rechts_en_gaat_vooruit():
-    from shield.flight.sturing import zoek_vegen
+def test_zigzag_gaat_eerst_links_dan_rechts_en_daalt_kort():
+    from shield.flight.sturing import ZIG_DAAL_S, zoek_zigzag
 
-    assert zoek_vegen(0).lr == 0
-    assert zoek_vegen(1.5).lr > 0 > zoek_vegen(4.5).lr
-    assert all(zoek_vegen(t).fb > 0 and zoek_vegen(t).ud == 0 for t in (0, 1, 2, 3))
+    assert zoek_zigzag(0).lr < 0 < zoek_zigzag(3.0).lr
+    assert all(zoek_zigzag(t).fb == 0 for t in (0, 1, 2, 3))
+    assert zoek_zigzag(0.5).ud < 0 and zoek_zigzag(ZIG_DAAL_S + 0.1).ud == 0
 
 
-def test_zoek_door_vegen_stopt_zodra_geel_zichtbaar():
+def test_zoek_door_zigzag_stopt_zodra_geel_zichtbaar():
     class Camera:
         frame = frame_met_blok((255, 230, 0), 300, 400)
 
     vlucht = Vlucht(NepTello(), camera=Camera())
-    assert vlucht.zoek_door_vegen(vind_geel) is not None
+    assert vlucht.zoek_door_zigzag(vind_geel) is not None
     assert vlucht.tello.commandos[-1] == (0, 0, 0, 0)
 
 
-def test_zoek_door_vegen_geeft_noodstop_na_timeout():
+def test_zoek_door_zigzag_geeft_noodstop_na_timeout():
     class Camera:
         frame = np.zeros((720, 960, 3), dtype=np.uint8)
 
     vlucht = Vlucht(NepTello(), camera=Camera())
     with pytest.raises(Noodstop):
-        vlucht.zoek_door_vegen(vind_geel, timeout_s=0.3)
+        vlucht.zoek_door_zigzag(vind_geel, timeout_s=0.3)
 
 
 def test_geel_op_de_vloer_wordt_niet_gezien():

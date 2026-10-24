@@ -10,7 +10,7 @@ from typing import Callable, Iterator
 import numpy as np
 from djitellopy import Tello, TelloException
 
-from shield.flight.sturing import STIL, Rc, corrigeer, naar_marker, zoek_dalen, zoek_draaien, zoek_vegen
+from shield.flight.sturing import STIL, Rc, corrigeer, naar_marker, zoek_dalen, zoek_draaien, zoek_zigzag
 from shield.vision.markers import Marker
 
 MIN_BATTERIJ = 40
@@ -168,10 +168,10 @@ class Vlucht:
         stap("zoeken door draaien")
         return self.zoek_marker(zoeker, lambda t: zoek_draaien(), timeout_s)
 
-    def zoek_door_vegen(self, zoeker: Zoeker, timeout_s: float = 10) -> Marker:
-        """Vooruit en links-rechts zwaaien; ~10 s bij rc 6 is ruim een meter vooruit."""
-        stap("zoeken door vegen")
-        return self.zoek_marker(zoeker, zoek_vegen, timeout_s, max_afwijking=None)
+    def zoek_door_zigzag(self, zoeker: Zoeker, timeout_s: float = 15) -> Marker:
+        """Links-rechts zigzaggen en dalen tot de marker in beeld is."""
+        stap("zoeken door zigzag")
+        return self.zoek_marker(zoeker, zoek_zigzag, timeout_s, max_afwijking=None)
 
     def vlieg_en_land(self, zoeker: Zoeker, timeout_s: float = 30) -> None:
         """Volg de marker. Land als hij laag in beeld staat of onderin verdwijnt (bevestigd)."""
