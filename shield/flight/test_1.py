@@ -1,4 +1,4 @@
-"""Test 1: opstijgen van het gele kruis, vooruit, 180 graden draaien, geel zoeken en erop landen.
+"""Test 1: opstijgen, vooruit tot de muur, rondkijken naar het gele kruis, erheen vliegen en landen.
 
 Start vanuit de projectroot:
     python -m shield.flight.test_1
@@ -14,8 +14,7 @@ from shield.vision.markers import vind_geel
 def plan(vlucht: Vlucht) -> None:
     vlucht.opstijgen()
     vlucht.vooruit()
-    vlucht.draai(180)
-    vlucht.zoek_door_raster(vind_geel)
+    vlucht.zoek_kruis(vind_geel)
     vlucht.vlieg_en_land(vind_geel)
 
 

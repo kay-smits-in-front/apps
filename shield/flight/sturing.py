@@ -6,17 +6,19 @@ import numpy as np
 
 from shield.vision.markers import Marker
 
-DOEL_Y = 0.35  # Gewenste hoogte van de marker in het beeld (0 = midden, 1 = onderrand).
+DOEL_Y = 0.5  # Gewenste hoogte van het kruis in beeld (0 = midden, 1 = onderrand).
 KP_YAW = 45.0
-KP_HOOGTE = 60.0
+KP_HOOGTE = 40.0
 VOORUIT_SNEL = 15
-ZOEK_DAAL = -12
+MAX_DAAL = -20
+MAX_STIJG = 20
+CENTREER_X = 0.25  # Alleen vooruit vliegen als het kruis minstens zo dicht bij het midden staat.
+ROND_RC = 30  # Draaisnelheid bij rondkijken (ongeveer graden per seconde).
 MAX_RC = 100
-# Zoekraster: rechts, zakken, links, zakken, rechts... met de ingebouwde move-commando's (min. 20 cm).
-RASTER_STAP_CM = 30
-RASTER_STAPPEN_PER_RIJ = 1
-RASTER_RIJEN = 3
-RASTER_ZAKKEN_CM = 20
+
+# Standpunten voor het rondkijken, na het eerste rondje: stijgen, dalen, rechts, stijgen, links, dalen.
+# Samen een raster van 2 hoogtes x 3 plekken rond het startpunt. Move-commando's: minimaal 20 cm.
+UITKIJKPUNTEN = (("up", 20), ("down", 40), ("right", 30), ("up", 40), ("left", 60), ("down", 40))
 
 
 class Rc(NamedTuple):
@@ -43,21 +45,11 @@ def begrens(waarde: float) -> int:
 
 
 def naar_marker(marker: Marker) -> Rc:
-    """Draai naar de marker, houd hem op DOEL_Y door te stijgen/dalen, vlieg langzaam vooruit."""
+    """Draai naar het kruis, vlieg vooruit als het in het midden staat, houd het op DOEL_Y."""
     yaw = begrens(KP_YAW * marker.x)
-    ud = begrens(-KP_HOOGTE * (marker.y - DOEL_Y))
-    fb = VOORUIT_SNEL if abs(marker.x) < 0.4 else 0
+    ud = int(np.clip(-KP_HOOGTE * (marker.y - DOEL_Y), MAX_DAAL, MAX_STIJG))
+    fb = VOORUIT_SNEL if abs(marker.x) < CENTREER_X else 0
     return Rc(0, fb, ud, yaw)
-
-
-def zoek_dalen() -> Rc:
-    """Marker nog niet zichtbaar: langzaam dalen."""
-    return Rc(0, 0, ZOEK_DAAL, 0)
-
-
-def zoek_draaien(snelheid: int = 25) -> Rc:
-    """Marker nog niet zichtbaar: langzaam om de eigen as draaien."""
-    return Rc(0, 0, 0, snelheid)
 
 
 def demping(vx: float, vy: float) -> Rc:
@@ -73,13 +65,6 @@ def corrigeer(rc: Rc, vx: float, vy: float) -> Rc:
     return Rc(rc.lr or d.lr, rc.fb or d.fb, rc.ud, rc.yaw)
 
 
-def raster_stappen() -> list[tuple[str, int]]:
-    """Volgorde van (richting, cm): rechts, zakken, links, zakken, rechts..., richting = move_<richting>."""
-    stappen: list[tuple[str, int]] = []
-    zijwaarts = "right"
-    for rij in range(RASTER_RIJEN):
-        stappen += [(zijwaarts, RASTER_STAP_CM)] * RASTER_STAPPEN_PER_RIJ
-        if rij < RASTER_RIJEN - 1:
-            stappen.append(("down", RASTER_ZAKKEN_CM))
-        zijwaarts = "left" if zijwaarts == "right" else "right"
-    return stappen
+def uitkijkpunten() -> list[tuple[str, int]]:
+    """Volgorde van (richting, cm) voor het wisselen van standpunt; richting = move_<richting>."""
+    return list(UITKIJKPUNTEN)

@@ -5,7 +5,7 @@ import threading
 import cv2
 import numpy as np
 
-from shield.vision.markers import score, vind_geel, vind_groen
+from shield.vision.markers import SCORE_GEVONDEN, vind_geel, vind_groen
 from shield.vision.muur import muur_aandeel
 
 VENSTER = "SHIELD live (q = sluiten)"
@@ -20,7 +20,7 @@ def teken(frame_rgb: np.ndarray) -> np.ndarray:
         if (marker := zoeker(frame_rgb)) is not None:
             punt = (int((marker.x + 1) / 2 * breedte), int((marker.y + 1) / 2 * hoogte))
             cv2.circle(scherm, punt, 25, kleur, 3)
-            tekst = f"{naam} score {score(marker):.0%} ({marker.oppervlak:.2%} van beeld)"
+            tekst = f"{naam} KRUIS {marker.score:.0%}" + (" OK" if marker.score >= SCORE_GEVONDEN else "")
             cv2.putText(scherm, tekst, (punt[0] + 30, punt[1]), cv2.FONT_HERSHEY_SIMPLEX, 0.7, kleur, 2)
     return scherm
 

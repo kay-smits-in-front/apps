@@ -1,4 +1,4 @@
-"""Test 2: opstijgen van geel, het groene kruis zoeken, ernaartoe vliegen en landen.
+"""Test 2: opstijgen, vooruit tot de muur, rondkijken naar het groene kruis, erheen vliegen en landen.
 
 Start vanuit de projectroot:
     python -m shield.flight.test_2
@@ -10,13 +10,11 @@ from shield.flight.drone import Vlucht
 from shield.flight.runner import voer_uit
 from shield.vision.markers import vind_groen
 
-OMHOOG_S = 1.5  # Het groene kruis staat hoger (kastje); eerst boven het kastje vliegen.
-
 
 def plan(vlucht: Vlucht) -> None:
     vlucht.opstijgen()
-    vlucht.omhoog(OMHOOG_S)
-    vlucht.zoek_door_draaien(vind_groen)
+    vlucht.vooruit()
+    vlucht.zoek_kruis(vind_groen)
     vlucht.vlieg_en_land(vind_groen)
 
 

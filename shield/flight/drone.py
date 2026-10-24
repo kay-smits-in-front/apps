@@ -10,17 +10,19 @@ from typing import Callable, Iterator
 import numpy as np
 from djitellopy import Tello, TelloException
 
-from shield.flight.sturing import STIL, Rc, corrigeer, naar_marker, raster_stappen, zoek_dalen, zoek_draaien
-from shield.vision.markers import SCORE_INTERESSANT, Marker, score
+from shield.flight.sturing import ROND_RC, STIL, Rc, corrigeer, naar_marker, uitkijkpunten
+from shield.vision.markers import SCORE_GEVONDEN, Marker
 from shield.vision.muur import MUUR_STOP, muur_aandeel
 
 MIN_BATTERIJ = 40
-MIN_HOOGTE_CM = 25
+MIN_HOOGTE_CM = 25  # Niet verder dalen onder deze hoogte (als de hoogtemeting klopt).
+DAAL_BUDGET_S = 4.0  # Totaal aantal seconden dat bij het naderen gedaald mag worden.
 LOOP_TIJD_S = 0.03
-LANDEN_Y = 0.75
-LAATSTE_METERS_CM = 20
-BEVESTIG_FRAMES = 5  # Een marker telt pas als hij zo vaak achter elkaar is gezien.
-KWIJT_FRAMES = 8  # Zo lang kwijt onderin beeld = we zijn erboven.
+LANDEN_Y = 0.7  # Kruis zo laag in beeld (en gecentreerd): we zijn er bijna.
+LAATSTE_CM = 20  # Laatste stuk vooruit met het kruis onder de camera uit beeld.
+MIN_NADER_S = 1.5  # Nooit landen voor we minstens zo lang naar het kruis zijn gevlogen.
+BEVESTIG_FRAMES = 5  # Een kruis telt pas als hij zo vaak achter elkaar is gezien.
+KWIJT_FRAMES = 8  # Zo lang kwijt = onder de camera verdwenen of echt weg.
 STABILISEER_S = 1.0
 VOORUIT_RC = 20  # Was 40 x 2.5 s: te ver en te hard.
 VOORUIT_MAX_S = 2.0  # Maximale duur; stopt eerder zodra de muur het beeld vult.
@@ -33,6 +35,20 @@ SNELHEID_CM = 10  # Aanname: vgx/vgy uit de statuspakketten zijn dm/s. Klopt dit
 START = time.monotonic()
 
 Zoeker = Callable[[np.ndarray], Marker | None]
+
+
+class Hoek:
+    """Telt hoeveel graden de drone gedraaid is, ook over de +-180 grens heen."""
+
+    def __init__(self, yaw: float) -> None:
+        self.vorige = yaw
+        self.totaal = 0.0
+
+    def bijwerken(self, yaw: float) -> float:
+        """Verwerk een nieuwe yaw en geef het totaal gedraaide aantal graden (positief)."""
+        self.totaal += (yaw - self.vorige + 540) % 360 - 180
+        self.vorige = yaw
+        return abs(self.totaal)
 
 
 class Noodstop(RuntimeError):
@@ -71,6 +87,7 @@ class Vlucht:
         self.tello = tello
         self.camera = camera
         self.positie = Positie(tello)
+        self.daal_s = DAAL_BUDGET_S
         self.stop = threading.Event()  # Gezet door q: direct landen.
         self.max_afwijking: float | None = None  # None = bewust bewegen, geen afstandslimiet.
 
@@ -110,11 +127,6 @@ class Vlucht:
         stap("stabiliseren")
         self.houd(STIL, STABILISEER_S)
 
-    def omhoog(self, seconden: float) -> None:
-        stap("omhoog")
-        self.houd(Rc(0, 0, OMHOOG_RC, 0), seconden, max_afwijking=None)
-        self.houd(STIL, 1.0, max_afwijking=None)
-
     def vooruit(self, max_s: float = VOORUIT_MAX_S) -> None:
         """Vlieg vooruit tot de muur het beeld vult (bevestigd) of max_s om is."""
         stap("vooruit tot muur")
@@ -132,50 +144,14 @@ class Vlucht:
         """Draai via rc-yaw op de gemeten yaw. 'cw' faalt zonder geldige vision-positie."""
         stap(f"draaien {graden:.0f}")
         self.nieuw_nulpunt(None)  # Alleen helling bewaken; de snelheid draait mee met de drone.
-        gedraaid, vorige = 0.0, self.tello.get_yaw()
+        hoek = Hoek(self.tello.get_yaw())
         einde = time.monotonic() + timeout_s
-        while abs(gedraaid) < graden - marge:
+        while (gedraaid := hoek.bijwerken(self.tello.get_yaw())) < graden - marge:
             if time.monotonic() > einde:
                 raise Noodstop("Draaien duurt te lang.")
-            yaw = self.tello.get_yaw()
-            gedraaid += (yaw - vorige + 540) % 360 - 180
-            vorige = yaw
-            snelheid = int(np.clip(graden - abs(gedraaid), 25, 60))
-            self.stuur(Rc(0, 0, 0, snelheid))
+            self.stuur(Rc(0, 0, 0, int(np.clip(graden - gedraaid, 25, 60))))
             time.sleep(0.05)
         self.houd(STIL, 1.0)
-
-    def zoek_marker(
-        self,
-        zoeker: Zoeker,
-        zoek_actie: Callable[[float], Rc],
-        timeout_s: float,
-        max_afwijking: float | None = MAX_AFWIJKING_CM,
-        min_hoogte: float = 0.0,
-    ) -> Marker:
-        """Voer zoek_actie(t) uit tot de marker zichtbaar is. Faalt na timeout of te lage hoogte."""
-        self.nieuw_nulpunt(max_afwijking)
-        start = time.monotonic()
-        gezien = 0
-        while (t := time.monotonic() - start) < timeout_s:
-            marker = zoeker(self.camera.frame)
-            gezien = gezien + 1 if marker is not None else 0
-            if gezien >= BEVESTIG_FRAMES:
-                self.stuur(STIL)
-                return marker
-            if min_hoogte and self.tello.get_height() < min_hoogte:
-                break
-            self.stuur(zoek_actie(t))
-            time.sleep(LOOP_TIJD_S)
-        raise Noodstop("Marker niet gevonden.")
-
-    def zoek_door_dalen(self, zoeker: Zoeker, timeout_s: float = 20) -> Marker:
-        stap("zoeken door dalen")
-        return self.zoek_marker(zoeker, lambda t: zoek_dalen(), timeout_s, min_hoogte=MIN_HOOGTE_CM)
-
-    def zoek_door_draaien(self, zoeker: Zoeker, timeout_s: float = 25) -> Marker:
-        stap("zoeken door draaien")
-        return self.zoek_marker(zoeker, lambda t: zoek_draaien(), timeout_s)
 
     def verplaats(self, richting: str, cm: int) -> None:
         """Eén stap met het ingebouwde move-commando. Weigert de drone dat, dan noodstop."""
@@ -186,64 +162,83 @@ class Vlucht:
             raise Noodstop(f"Stap '{richting}' geweigerd door de drone: {fout}") from fout
         self.controleer()
 
-    def zie_marker(self, zoeker: Zoeker, kijk_s: float = 0.5) -> Marker | None:
-        """Hang stil en kijk. Marker terug als de score BEVESTIG_FRAMES achter elkaar hoog genoeg is."""
-        einde = time.monotonic() + kijk_s
-        gezien, beste = 0, 0.0
-        while time.monotonic() < einde:
+    def rondkijken(self, zoeker: Zoeker, graden: float = 360.0, snelheid: int | None = None) -> Marker | None:
+        """Draai langzaam rond en kijk naar elk beeld. Kruis terug zodra het BEVESTIG_FRAMES achter elkaar klopt."""
+        snelheid = snelheid or ROND_RC
+        self.nieuw_nulpunt(None)
+        hoek = Hoek(self.tello.get_yaw())
+        einde = time.monotonic() + 2 * graden / snelheid + 5
+        gezien = 0
+        while hoek.bijwerken(self.tello.get_yaw()) < graden and time.monotonic() < einde:
             marker = zoeker(self.camera.frame)
-            huidig = score(marker) if marker is not None else 0.0
-            beste = max(beste, huidig)
-            gezien = gezien + 1 if huidig >= SCORE_INTERESSANT else 0
+            gezien = gezien + 1 if marker is not None and marker.score >= SCORE_GEVONDEN else 0
             if gezien >= BEVESTIG_FRAMES:
-                stap(f"score {huidig:.0%}: interessant")
+                self.stuur(STIL)
+                stap(f"kruis gezien, score {marker.score:.0%}")
                 return marker
-            self.stuur(STIL)
+            self.stuur(Rc(0, 0, 0, snelheid))
             time.sleep(LOOP_TIJD_S)
-        stap(f"score max {beste:.0%}")
+        self.stuur(STIL)
         return None
 
-    def zoek_door_raster(self, zoeker: Zoeker, timeout_s: float = 60, kijk_s: float = 0.5) -> Marker:
-        """Rechts, zakken, links, zakken...; na elke stap kijken. Stopt bij een interessante score."""
-        stap("zoeken door raster")
-        self.nieuw_nulpunt(None)
+    def zoek_kruis(self, zoeker: Zoeker, timeout_s: float = 150) -> Marker:
+        """Rondkijken; niets gezien? Wissel van standpunt (stijgen, dalen, links, rechts) en kijk opnieuw rond."""
         start = time.monotonic()
-        for richting, cm in raster_stappen() + [("klaar", 0)]:
-            if (marker := self.zie_marker(zoeker, kijk_s)) is not None:
-                return marker
-            if richting == "klaar" or time.monotonic() - start > timeout_s:
+        stap("rondkijken")
+        if (marker := self.rondkijken(zoeker)) is not None:
+            return marker
+        for richting, cm in uitkijkpunten():
+            if time.monotonic() - start > timeout_s:
                 break
             self.verplaats(richting, cm)
-        raise Noodstop("Marker niet gevonden.")
+            stap("rondkijken")
+            if (marker := self.rondkijken(zoeker)) is not None:
+                return marker
+        raise Noodstop("Geen kruis gevonden.")
 
-    def vlieg_en_land(self, zoeker: Zoeker, timeout_s: float = 30) -> None:
-        """Volg de marker. Land als hij laag in beeld staat of onderin verdwijnt (bevestigd)."""
-        stap("naar de marker")
+    def begrens_dalen(self, rc: Rc) -> Rc:
+        """Daal in totaal maximaal DAAL_BUDGET_S en nooit onder MIN_HOOGTE_CM (als de meting klopt)."""
+        if rc.ud >= 0:
+            return rc
+        hoogte = self.tello.get_height()
+        if self.daal_s <= 0 or 0 < hoogte < MIN_HOOGTE_CM:
+            return rc._replace(ud=0)
+        self.daal_s -= LOOP_TIJD_S
+        return rc
+
+    def vlieg_en_land(self, zoeker: Zoeker, timeout_s: float = 40, min_nader_s: float = MIN_NADER_S) -> None:
+        """Vlieg naar het kruis en land. Pas bij een gecentreerd kruis onderin beeld, na min_nader_s."""
+        stap("naar het kruis")
         self.nieuw_nulpunt(None)
         start = time.monotonic()
         laatste: Marker | None = None
-        dichtbij = kwijt = 0
-        rc = STIL
+        rc, nabij, kwijt = STIL, 0, 0
         while time.monotonic() - start < timeout_s:
             marker = zoeker(self.camera.frame)
-            if marker is None:
-                kwijt, dichtbij = kwijt + 1, 0
-                if kwijt >= KWIJT_FRAMES and laatste is not None and laatste.y > LANDEN_Y - 0.15:
-                    break
-                self.stuur(rc if kwijt < KWIJT_FRAMES else STIL)  # Kort kwijt: koers houden.
-            else:
+            genoeg_tijd = time.monotonic() - start >= min_nader_s
+            if marker is not None and marker.score >= SCORE_GEVONDEN:
                 kwijt, laatste = 0, marker
-                dichtbij = dichtbij + 1 if marker.y > LANDEN_Y else 0
-                if dichtbij >= BEVESTIG_FRAMES:
+                nabij = nabij + 1 if abs(marker.x) < 0.25 and marker.y > LANDEN_Y else 0
+                if nabij >= BEVESTIG_FRAMES and genoeg_tijd:
                     break
-                rc = naar_marker(marker)
+                rc = self.begrens_dalen(naar_marker(marker))
                 self.stuur(rc)
+            else:
+                kwijt, nabij = kwijt + 1, 0
+                if kwijt >= KWIJT_FRAMES:
+                    if laatste is not None and laatste.y > LANDEN_Y - 0.15 and genoeg_tijd:
+                        break  # Onderin beeld verdwenen: we zijn erboven.
+                    raise Noodstop("Kruis kwijt.")
+                self.stuur(rc)  # Kort kwijt: koers houden.
             time.sleep(LOOP_TIJD_S)
         else:
-            raise Noodstop("Niet op tijd bij de marker.")
+            raise Noodstop("Niet op tijd bij het kruis.")
         stap("laatste stuk en landen")
-        self.houd(Rc(0, VOORUIT_RC, 0, 0), LAATSTE_METERS_CM / 100, max_afwijking=None)
-        self.tello.send_rc_control(*STIL)
+        self.stuur(STIL)
+        try:
+            self.tello.move_forward(LAATSTE_CM)
+        except TelloException:
+            pass  # Landen op de plek waar we nu zijn is beter dan niet landen.
         self.tello.land()
 
 
