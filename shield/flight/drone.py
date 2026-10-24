@@ -2,6 +2,7 @@
 
 import logging
 import math
+import threading
 import time
 from contextlib import contextmanager
 from typing import Callable, Iterator
@@ -10,7 +11,6 @@ import numpy as np
 from djitellopy import Tello, TelloException
 
 from shield.flight.sturing import STIL, Rc, corrigeer, naar_marker, zoek_dalen, zoek_draaien, zoek_vegen
-from shield.vision.live import LiveBeeld
 from shield.vision.markers import Marker
 
 MIN_BATTERIJ = 40
@@ -18,7 +18,9 @@ MIN_HOOGTE_CM = 25
 LOOP_TIJD_S = 0.03
 LANDEN_Y = 0.75
 LAATSTE_METERS_CM = 20
-STABILISEER_S = 4.0
+BEVESTIG_FRAMES = 5  # Een marker telt pas als hij zo vaak achter elkaar is gezien.
+KWIJT_FRAMES = 8  # Zo lang kwijt onderin beeld = we zijn erboven.
+STABILISEER_S = 1.0
 VOORUIT_RC = 20  # Was 40 x 2.5 s: te ver en te hard.
 VOORUIT_S = 2.0
 OMHOOG_RC = 40
@@ -68,10 +70,13 @@ class Vlucht:
         self.tello = tello
         self.camera = camera
         self.positie = Positie(tello)
+        self.stop = threading.Event()  # Gezet door q: direct landen.
         self.max_afwijking: float | None = None  # None = bewust bewegen, geen afstandslimiet.
 
     def controleer(self) -> None:
         """Gooi Noodstop als de drone te scheef hangt of te ver van het nulpunt is."""
+        if self.stop.is_set():
+            raise Noodstop("Gestopt met q.")
         self.positie.bijwerken()
         helling = max(abs(self.tello.get_pitch()), abs(self.tello.get_roll()))
         if helling > MAX_HELLING_GRADEN:
@@ -142,8 +147,11 @@ class Vlucht:
         """Voer zoek_actie(t) uit tot de marker zichtbaar is. Faalt na timeout of te lage hoogte."""
         self.nieuw_nulpunt(max_afwijking)
         start = time.monotonic()
+        gezien = 0
         while (t := time.monotonic() - start) < timeout_s:
-            if (marker := zoeker(self.camera.frame)) is not None:
+            marker = zoeker(self.camera.frame)
+            gezien = gezien + 1 if marker is not None else 0
+            if gezien >= BEVESTIG_FRAMES:
                 self.stuur(STIL)
                 return marker
             if min_hoogte and self.tello.get_height() < min_hoogte:
@@ -166,22 +174,25 @@ class Vlucht:
         return self.zoek_marker(zoeker, zoek_vegen, timeout_s, max_afwijking=None)
 
     def vlieg_en_land(self, zoeker: Zoeker, timeout_s: float = 30) -> None:
-        """Volg de marker; zodra hij laag in beeld is of onderin verdwijnt: laatste stuk en landen."""
+        """Volg de marker. Land als hij laag in beeld staat of onderin verdwijnt (bevestigd)."""
         stap("naar de marker")
         self.nieuw_nulpunt(None)
-        einde = time.monotonic() + timeout_s
+        start = time.monotonic()
         laatste: Marker | None = None
-        while time.monotonic() < einde:
+        dichtbij = kwijt = 0
+        while time.monotonic() - start < timeout_s:
             marker = zoeker(self.camera.frame)
             if marker is None:
-                if laatste is not None and laatste.y > LANDEN_Y - 0.15:
+                kwijt, dichtbij = kwijt + 1, 0
+                if kwijt >= KWIJT_FRAMES and laatste is not None and laatste.y > LANDEN_Y - 0.15:
                     break
                 self.stuur(STIL)
-            elif marker.y > LANDEN_Y:
-                break
             else:
+                kwijt, laatste = 0, marker
+                dichtbij = dichtbij + 1 if marker.y > LANDEN_Y else 0
+                if dichtbij >= BEVESTIG_FRAMES:
+                    break
                 self.stuur(naar_marker(marker))
-                laatste = marker
             time.sleep(LOOP_TIJD_S)
         else:
             raise Noodstop("Niet op tijd bij de marker.")
@@ -204,7 +215,7 @@ def landen(tello: Tello) -> None:
 
 
 @contextmanager
-def vlucht_met_camera(toon_beeld: bool = True) -> Iterator[Vlucht]:
+def vlucht_met_camera() -> Iterator[Vlucht]:
     """Verbind, zet de camera aan voor het opstijgen en land altijd, ook bij een noodstop."""
     logging.getLogger("djitellopy").setLevel(logging.WARNING)  # Elke rc-regel printen vertraagt.
     Tello.RESPONSE_TIMEOUT = 3
@@ -217,16 +228,11 @@ def vlucht_met_camera(toon_beeld: bool = True) -> Iterator[Vlucht]:
     camera = tello.get_frame_read()
     while camera.frame is None or not camera.frame.any():
         time.sleep(0.05)
-    live = LiveBeeld(camera) if toon_beeld else None
-    if live:
-        live.start()
     try:
         yield Vlucht(tello, camera)
     except Noodstop as reden:
         print(f"NOODSTOP: {reden}")
     finally:
         landen(tello)
-        if live:
-            live.sluit()
         tello.streamoff()
         tello.end()

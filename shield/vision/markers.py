@@ -11,9 +11,11 @@ import numpy as np
 
 SCHAAL = 3  # Frame 960x720 -> 320x240: ~9x minder pixels, genoeg voor tape.
 MIN_OPPERVLAK = 60  # Pixels in het verkleinde beeld.
+MAX_AANDEEL = 0.4  # Meer dan dit deel van het beeld is vloer of muur, geen tape.
 
 # Zelfde kleurbereiken als de oude marker_test.
-GEEL = ((18, 70, 70), (40, 255, 255))
+# Geel begint op hue 22: de oranje houten vloer ligt onder warm licht rond hue 10-18.
+GEEL = ((22, 70, 70), (40, 255, 255))
 GROEN = ((35, 45, 40), (90, 255, 255))
 
 
@@ -37,15 +39,17 @@ def kleur_masker(frame_rgb: np.ndarray, bereik: tuple) -> np.ndarray:
 
 
 def marker_uit_masker(masker: np.ndarray) -> Marker | None:
-    """Zwaartepunt en grootte van het masker, of None als er te weinig is."""
-    momenten = cv2.moments(masker, binaryImage=True)
-    oppervlak = momenten["m00"]
-    if oppervlak < MIN_OPPERVLAK:
+    """Zwaartepunt en grootte van het grootste vlek in het masker, of None."""
+    aantal, _, stats, zwaartepunten = cv2.connectedComponentsWithStats(masker)
+    if aantal < 2:
         return None
+    grootste = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
+    oppervlak = stats[grootste, cv2.CC_STAT_AREA]
     hoogte, breedte = masker.shape
-    x = momenten["m10"] / oppervlak / breedte * 2 - 1
-    y = momenten["m01"] / oppervlak / hoogte * 2 - 1
-    return Marker(x, y, oppervlak / (hoogte * breedte))
+    if oppervlak < MIN_OPPERVLAK or oppervlak > MAX_AANDEEL * hoogte * breedte:
+        return None
+    x, y = zwaartepunten[grootste]
+    return Marker(x / breedte * 2 - 1, y / hoogte * 2 - 1, oppervlak / (hoogte * breedte))
 
 
 def vind_marker(frame_rgb: np.ndarray, bereik: tuple) -> Marker | None:

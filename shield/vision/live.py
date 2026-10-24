@@ -25,24 +25,29 @@ def teken(frame_rgb: np.ndarray) -> np.ndarray:
 
 
 class LiveBeeld:
-    """Toont het camerabeeld in een eigen thread, zodat de vluchtlus er niet door vertraagt."""
+    """Live beeld in de hoofdthread (dat is de betrouwbare plek voor OpenCV-vensters).
+
+    Toetsen: SPATIE zet `start`, q zet `stop` (en `start`, zodat wachtende code vrijkomt).
+    """
+
+    HINT = "SPATIE = opstijgen | q = stoppen en landen"
 
     def __init__(self, camera) -> None:
         self.camera = camera
+        self.start = threading.Event()
         self.stop = threading.Event()
-        self.thread = threading.Thread(target=self._loop, daemon=True)
 
-    def start(self) -> None:
-        self.thread.start()
-
-    def sluit(self) -> None:
-        self.stop.set()
-        self.thread.join(timeout=2)
-
-    def _loop(self) -> None:
-        while not self.stop.is_set():
+    def toon(self, werker: threading.Thread) -> None:
+        """Toon beeld tot de werker-thread klaar is of q wordt ingedrukt."""
+        while werker.is_alive() and not self.stop.is_set():
             if (frame := self.camera.frame) is not None:
-                cv2.imshow(VENSTER, teken(frame))
-            if cv2.waitKey(30) & 0xFF == ord("q"):
-                break
+                scherm = teken(frame)
+                cv2.putText(scherm, self.HINT, (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+                cv2.imshow(VENSTER, scherm)
+            toets = cv2.waitKey(30) & 0xFF
+            if toets == ord(" "):
+                self.start.set()
+            elif toets == ord("q"):
+                self.stop.set()
+                self.start.set()
         cv2.destroyAllWindows()

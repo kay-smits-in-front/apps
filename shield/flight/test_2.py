@@ -2,22 +2,23 @@
 
 Start vanuit de projectroot:
     python -m shield.flight.test_2
+
+Het live beeld opent eerst. SPATIE in het venster = opstijgen, q = direct landen.
 """
 
-from shield.flight.drone import vlucht_met_camera
+from shield.flight.drone import Vlucht
+from shield.flight.runner import voer_uit
 from shield.vision.markers import vind_groen
 
 OMHOOG_S = 1.5  # Het groene kruis staat hoger (kastje); eerst boven het kastje vliegen.
 
 
-def main() -> None:
-    with vlucht_met_camera() as vlucht:
-        input("Zet de drone op het gele kruis, ruimte vrij. Enter = opstijgen: ")
-        vlucht.opstijgen()
-        vlucht.omhoog(OMHOOG_S)
-        vlucht.zoek_door_draaien(vind_groen)
-        vlucht.vlieg_en_land(vind_groen)
+def plan(vlucht: Vlucht) -> None:
+    vlucht.opstijgen()
+    vlucht.omhoog(OMHOOG_S)
+    vlucht.zoek_door_draaien(vind_groen)
+    vlucht.vlieg_en_land(vind_groen)
 
 
 if __name__ == "__main__":
-    main()
+    voer_uit(plan)

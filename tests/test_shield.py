@@ -43,13 +43,14 @@ from shield.flight.sturing import STIL, Rc, corrigeer
 class NepTello:
     def __init__(self, vx=0, vy=0, pitch=0, roll=0, draait=False):
         self.vx, self.vy, self.pitch, self.roll, self.draait = vx, vy, pitch, roll, draait
-        self.yaw, self.commandos = 0.0, []
+        self.yaw, self.commandos, self.geland = 0.0, [], False
 
     def get_speed_x(self): return self.vx
     def get_speed_y(self): return self.vy
     def get_pitch(self): return self.pitch
     def get_roll(self): return self.roll
     def get_yaw(self): return self.yaw
+    def land(self): self.geland = True
 
     def send_rc_control(self, lr, fb, ud, yaw):
         self.commandos.append((lr, fb, ud, yaw))
@@ -119,3 +120,36 @@ def test_zoek_door_vegen_geeft_noodstop_na_timeout():
     vlucht = Vlucht(NepTello(), camera=Camera())
     with pytest.raises(Noodstop):
         vlucht.zoek_door_vegen(vind_geel, timeout_s=0.3)
+
+
+def test_geel_op_de_vloer_wordt_niet_gezien():
+    vloer = np.zeros((720, 960, 3), dtype=np.uint8)
+    vloer[:] = (200, 120, 50)  # Oranje hout (hue ~12), vult het hele beeld.
+    assert vind_geel(vloer) is None
+
+
+def test_vliegt_naar_de_marker_en_landt_niet_meteen():
+    class Camera:
+        frame = frame_met_blok((255, 230, 0), 300, 420)  # Midden, y ~ 0.1.
+
+    vlucht = Vlucht(NepTello(), camera=Camera())
+    with pytest.raises(Noodstop):
+        vlucht.vlieg_en_land(vind_geel, timeout_s=0.4)
+    assert any(c[1] > 0 for c in vlucht.tello.commandos)  # Er is vooruit gestuurd.
+    assert not vlucht.tello.geland
+
+
+def test_landt_als_marker_laag_in_beeld_staat():
+    class Camera:
+        frame = frame_met_blok((255, 230, 0), 580, 420)  # Onderin, y ~ 0.85.
+
+    vlucht = Vlucht(NepTello(), camera=Camera())
+    vlucht.vlieg_en_land(vind_geel, timeout_s=2)
+    assert vlucht.tello.geland
+
+
+def test_q_stopt_de_vlucht_direct():
+    vlucht = Vlucht(NepTello(), camera=None)
+    vlucht.stop.set()
+    with pytest.raises(Noodstop):
+        vlucht.stuur(STIL)
