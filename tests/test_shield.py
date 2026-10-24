@@ -43,7 +43,7 @@ from shield.flight.sturing import STIL, Rc, corrigeer
 class NepTello:
     def __init__(self, vx=0, vy=0, pitch=0, roll=0, draait=False):
         self.vx, self.vy, self.pitch, self.roll, self.draait = vx, vy, pitch, roll, draait
-        self.yaw, self.commandos, self.geland = 0.0, [], False
+        self.yaw, self.commandos, self.geland, self.stappen = 0.0, [], False, []
 
     def get_speed_x(self): return self.vx
     def get_speed_y(self): return self.vy
@@ -51,6 +51,9 @@ class NepTello:
     def get_roll(self): return self.roll
     def get_yaw(self): return self.yaw
     def land(self): self.geland = True
+    def move_right(self, cm): self.stappen.append(("right", cm))
+    def move_left(self, cm): self.stappen.append(("left", cm))
+    def move_down(self, cm): self.stappen.append(("down", cm))
 
     def send_rc_control(self, lr, fb, ud, yaw):
         self.commandos.append((lr, fb, ud, yaw))
@@ -96,30 +99,22 @@ def test_live_beeld_tekent_herkend_geel():
     assert (teken(np.zeros_like(frame)) == 0).all()
 
 
-def test_zigzag_gaat_eerst_links_dan_rechts_en_daalt_kort():
-    from shield.flight.sturing import ZIG_DAAL_S, zoek_zigzag
-
-    assert zoek_zigzag(0).lr < 0 < zoek_zigzag(3.0).lr
-    assert all(zoek_zigzag(t).fb == 0 for t in (0, 1, 2, 3))
-    assert zoek_zigzag(0.5).ud < 0 and zoek_zigzag(ZIG_DAAL_S + 0.1).ud == 0
-
-
-def test_zoek_door_zigzag_stopt_zodra_geel_zichtbaar():
+def test_zoek_door_raster_stopt_zodra_geel_zichtbaar():
     class Camera:
         frame = frame_met_blok((255, 230, 0), 300, 400)
 
     vlucht = Vlucht(NepTello(), camera=Camera())
-    assert vlucht.zoek_door_zigzag(vind_geel) is not None
+    assert vlucht.zoek_door_raster(vind_geel, kijk_s=0.5) is not None
     assert vlucht.tello.commandos[-1] == (0, 0, 0, 0)
 
 
-def test_zoek_door_zigzag_geeft_noodstop_na_timeout():
+def test_zoek_door_raster_geeft_noodstop_na_timeout():
     class Camera:
         frame = np.zeros((720, 960, 3), dtype=np.uint8)
 
     vlucht = Vlucht(NepTello(), camera=Camera())
     with pytest.raises(Noodstop):
-        vlucht.zoek_door_zigzag(vind_geel, timeout_s=0.3)
+        vlucht.zoek_door_raster(vind_geel, timeout_s=0.3)
 
 
 def test_geel_op_de_vloer_wordt_niet_gezien():
@@ -169,3 +164,58 @@ def test_marker_even_kwijt_houdt_koers():
         vlucht.vlieg_en_land(vind_geel, timeout_s=0.3)
     fb = [c[1] for c in vlucht.tello.commandos]
     assert fb[:6].count(0) == 0  # Eerste commando's blijven vooruit, ook na het kwijtraken.
+
+
+def test_raster_volgorde():
+    from shield.flight.sturing import raster_stappen
+
+    assert raster_stappen() == [("right", 30), ("down", 20), ("left", 30), ("down", 20), ("right", 30)]
+
+
+def test_raster_doorloopt_alle_stappen_als_niets_gevonden():
+    class Camera:
+        frame = np.zeros((720, 960, 3), dtype=np.uint8)
+
+    vlucht = Vlucht(NepTello(), camera=Camera())
+    with pytest.raises(Noodstop):
+        vlucht.zoek_door_raster(vind_geel, kijk_s=0.3)
+    assert vlucht.tello.stappen == [("right", 30), ("down", 20), ("left", 30), ("down", 20), ("right", 30)]
+
+
+def test_raster_stopt_voor_eerste_stap_als_geel_al_in_beeld():
+    class Camera:
+        frame = frame_met_blok((255, 230, 0), 300, 400)
+
+    vlucht = Vlucht(NepTello(), camera=Camera())
+    vlucht.zoek_door_raster(vind_geel)
+    assert vlucht.tello.stappen == []
+
+
+def test_te_weinig_geel_is_niet_interessant():
+    from shield.vision.markers import SCORE_INTERESSANT, score
+
+    klein = vind_geel(frame_met_blok((255, 230, 0), 300, 400, grootte=12))
+    assert klein is None or score(klein) < SCORE_INTERESSANT
+
+
+def test_muur_aandeel():
+    from shield.vision.muur import muur_aandeel
+
+    egaal = np.full((720, 960, 3), 200, dtype=np.uint8)
+    ruis = np.random.default_rng(0).integers(0, 255, (720, 960, 3), dtype=np.uint8)
+    assert muur_aandeel(egaal) > 0.99 and muur_aandeel(ruis) < 0.2
+
+
+def test_vooruit_stopt_bij_muur_en_gaat_door_in_open_ruimte():
+    class Muur:
+        frame = np.full((720, 960, 3), 200, dtype=np.uint8)
+
+    class Open:
+        frame = np.random.default_rng(1).integers(0, 255, (720, 960, 3), dtype=np.uint8)
+
+    bij_muur = Vlucht(NepTello(), camera=Muur())
+    bij_muur.vooruit(max_s=1.0)
+    open_ruimte = Vlucht(NepTello(), camera=Open())
+    open_ruimte.vooruit(max_s=0.5)
+    vooruit = lambda v: sum(1 for c in v.tello.commandos if c[1] > 0)
+    assert vooruit(bij_muur) <= 5 < vooruit(open_ruimte)

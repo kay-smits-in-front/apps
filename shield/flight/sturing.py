@@ -12,12 +12,11 @@ KP_HOOGTE = 60.0
 VOORUIT_SNEL = 15
 ZOEK_DAAL = -12
 MAX_RC = 100
-# Zoeken in een vierkant: links-rechts zigzaggen terwijl hij langzaam daalt. Tijdgestuurd, want
-# de hoogtemeting is onbetrouwbaar. Zijwaartse reikwijdte ~ ZIG_LR x ZIG_PERIODE_S.
-ZIG_PERIODE_S = 6.0
-ZIG_LR = 20
-ZIG_DAAL = -10
-ZIG_DAAL_S = 3.0  # Zo lang dalen; daarna alleen links-rechts op de lagere hoogte.
+# Zoekraster: rechts, zakken, links, zakken, rechts... met de ingebouwde move-commando's (min. 20 cm).
+RASTER_STAP_CM = 30
+RASTER_STAPPEN_PER_RIJ = 1
+RASTER_RIJEN = 3
+RASTER_ZAKKEN_CM = 20
 
 
 class Rc(NamedTuple):
@@ -74,8 +73,13 @@ def corrigeer(rc: Rc, vx: float, vy: float) -> Rc:
     return Rc(rc.lr or d.lr, rc.fb or d.fb, rc.ud, rc.yaw)
 
 
-def zoek_zigzag(t: float) -> Rc:
-    """Zoeken: eerst naar links, dan rechts, enz. (gecentreerd om de start), met langzaam dalen."""
-    lr = int(-ZIG_LR * np.cos(2 * np.pi * t / ZIG_PERIODE_S))
-    ud = ZIG_DAAL if t < ZIG_DAAL_S else 0
-    return Rc(lr, 0, ud, 0)
+def raster_stappen() -> list[tuple[str, int]]:
+    """Volgorde van (richting, cm): rechts, zakken, links, zakken, rechts..., richting = move_<richting>."""
+    stappen: list[tuple[str, int]] = []
+    zijwaarts = "right"
+    for rij in range(RASTER_RIJEN):
+        stappen += [(zijwaarts, RASTER_STAP_CM)] * RASTER_STAPPEN_PER_RIJ
+        if rij < RASTER_RIJEN - 1:
+            stappen.append(("down", RASTER_ZAKKEN_CM))
+        zijwaarts = "left" if zijwaarts == "right" else "right"
+    return stappen

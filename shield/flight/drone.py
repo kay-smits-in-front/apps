@@ -10,8 +10,9 @@ from typing import Callable, Iterator
 import numpy as np
 from djitellopy import Tello, TelloException
 
-from shield.flight.sturing import STIL, Rc, corrigeer, naar_marker, zoek_dalen, zoek_draaien, zoek_zigzag
-from shield.vision.markers import Marker
+from shield.flight.sturing import STIL, Rc, corrigeer, naar_marker, raster_stappen, zoek_dalen, zoek_draaien
+from shield.vision.markers import SCORE_INTERESSANT, Marker, score
+from shield.vision.muur import MUUR_STOP, muur_aandeel
 
 MIN_BATTERIJ = 40
 MIN_HOOGTE_CM = 25
@@ -22,7 +23,7 @@ BEVESTIG_FRAMES = 5  # Een marker telt pas als hij zo vaak achter elkaar is gezi
 KWIJT_FRAMES = 8  # Zo lang kwijt onderin beeld = we zijn erboven.
 STABILISEER_S = 1.0
 VOORUIT_RC = 20  # Was 40 x 2.5 s: te ver en te hard.
-VOORUIT_S = 2.0
+VOORUIT_MAX_S = 2.0  # Maximale duur; stopt eerder zodra de muur het beeld vult.
 OMHOOG_RC = 40
 
 MAX_AFWIJKING_CM = 30  # Noodstop als de drone verder dan dit van het nulpunt raakt.
@@ -112,12 +113,20 @@ class Vlucht:
     def omhoog(self, seconden: float) -> None:
         stap("omhoog")
         self.houd(Rc(0, 0, OMHOOG_RC, 0), seconden, max_afwijking=None)
-        self.houd(STIL, 1.0)
+        self.houd(STIL, 1.0, max_afwijking=None)
 
-    def vooruit(self) -> None:
-        stap("vooruit")
-        self.houd(Rc(0, VOORUIT_RC, 0, 0), VOORUIT_S, max_afwijking=None)
-        self.houd(STIL, 1.0)
+    def vooruit(self, max_s: float = VOORUIT_MAX_S) -> None:
+        """Vlieg vooruit tot de muur het beeld vult (bevestigd) of max_s om is."""
+        stap("vooruit tot muur")
+        self.nieuw_nulpunt(None)
+        start, muur = time.monotonic(), 0
+        while time.monotonic() - start < max_s:
+            muur = muur + 1 if muur_aandeel(self.camera.frame) >= MUUR_STOP else 0
+            if muur >= BEVESTIG_FRAMES:
+                break
+            self.stuur(Rc(0, VOORUIT_RC, 0, 0))
+            time.sleep(LOOP_TIJD_S)
+        self.houd(STIL, 1.0, max_afwijking=None)
 
     def draai(self, graden: float, marge: float = 8, timeout_s: float = 15) -> None:
         """Draai via rc-yaw op de gemeten yaw. 'cw' faalt zonder geldige vision-positie."""
@@ -168,10 +177,44 @@ class Vlucht:
         stap("zoeken door draaien")
         return self.zoek_marker(zoeker, lambda t: zoek_draaien(), timeout_s)
 
-    def zoek_door_zigzag(self, zoeker: Zoeker, timeout_s: float = 15) -> Marker:
-        """Links-rechts zigzaggen en dalen tot de marker in beeld is."""
-        stap("zoeken door zigzag")
-        return self.zoek_marker(zoeker, zoek_zigzag, timeout_s, max_afwijking=None)
+    def verplaats(self, richting: str, cm: int) -> None:
+        """Eén stap met het ingebouwde move-commando. Weigert de drone dat, dan noodstop."""
+        stap(f"{richting} {cm} cm")
+        try:
+            getattr(self.tello, f"move_{richting}")(cm)
+        except TelloException as fout:
+            raise Noodstop(f"Stap '{richting}' geweigerd door de drone: {fout}") from fout
+        self.controleer()
+
+    def zie_marker(self, zoeker: Zoeker, kijk_s: float = 0.5) -> Marker | None:
+        """Hang stil en kijk. Marker terug als de score BEVESTIG_FRAMES achter elkaar hoog genoeg is."""
+        einde = time.monotonic() + kijk_s
+        gezien, beste = 0, 0.0
+        while time.monotonic() < einde:
+            marker = zoeker(self.camera.frame)
+            huidig = score(marker) if marker is not None else 0.0
+            beste = max(beste, huidig)
+            gezien = gezien + 1 if huidig >= SCORE_INTERESSANT else 0
+            if gezien >= BEVESTIG_FRAMES:
+                stap(f"score {huidig:.0%}: interessant")
+                return marker
+            self.stuur(STIL)
+            time.sleep(LOOP_TIJD_S)
+        stap(f"score max {beste:.0%}")
+        return None
+
+    def zoek_door_raster(self, zoeker: Zoeker, timeout_s: float = 60, kijk_s: float = 0.5) -> Marker:
+        """Rechts, zakken, links, zakken...; na elke stap kijken. Stopt bij een interessante score."""
+        stap("zoeken door raster")
+        self.nieuw_nulpunt(None)
+        start = time.monotonic()
+        for richting, cm in raster_stappen() + [("klaar", 0)]:
+            if (marker := self.zie_marker(zoeker, kijk_s)) is not None:
+                return marker
+            if richting == "klaar" or time.monotonic() - start > timeout_s:
+                break
+            self.verplaats(richting, cm)
+        raise Noodstop("Marker niet gevonden.")
 
     def vlieg_en_land(self, zoeker: Zoeker, timeout_s: float = 30) -> None:
         """Volg de marker. Land als hij laag in beeld staat of onderin verdwijnt (bevestigd)."""
