@@ -16,13 +16,21 @@ CENTREER_X = 0.25  # Alleen vooruit vliegen als het kruis minstens zo dicht bij 
 ROND_RC = 30  # Draaisnelheid bij rondkijken (ongeveer graden per seconde).
 MAX_RC = 100
 
+# Zoeken met afwisseling: vooruit, zijwaarts, een boog, en omhoog of omlaag binnen deze grenzen.
+ZOEK_VOORUIT_S = 4.0
+BOOG_YAW = 25  # Draaisnelheid tijdens een boog (rc-yaw).
+BOOG_S = 6.0
+MIN_ZOEK_CM = 40  # Niet lager zoeken dan dit (gemeten hoogte).
+MAX_ZOEK_CM = 160  # Niet hoger zoeken dan dit.
+MAX_NETTO_S = 2.0  # Als de hoogtemeting 0 geeft: nooit meer dan zoveel seconden netto stijgen of dalen.
+
 # Vluchtplan: kleine stijging, 360-graden scan, dan beslissen. Alles met limieten.
 START_OMHOOG_S = 0.8  # Kleine stijging voor de eerste scan.
 ZIJ_RC = 30
 ZIJ_S = 1.2  # Eén zijwaartse stap (als er vooruit een muur staat).
 HOOGTE_RC = 30
-HOOGTE_S = 0.7  # Eén stap omhoog of omlaag tussen twee scans.
-MAX_RONDES = 5  # Maximaal aantal scans voor we opgeven.
+HOOGTE_S = 1.0  # Eén stap omhoog of omlaag tussen twee scans.
+MAX_RONDES = 8  # Maximaal aantal scans voor we opgeven.
 HERSTEL_RC = 25  # Draaisnelheid om een kwijtgeraakt kruis terug te vinden.
 HERSTEL_S = 2.5
 SPOOR_SPRONG = 0.25  # Zo ver mag een kruis tussen twee beelden verspringen tijdens de scan (-1..1).
@@ -79,3 +87,16 @@ RICHTING = {
     "omhoog": Rc(0, 0, HOOGTE_RC, 0),
     "omlaag": Rc(0, 0, -HOOGTE_RC, 0),
 }
+
+
+def horizontale_opties(muur: bool) -> list[str]:
+    """Waarheen kan de drone horizontaal? Bij een muur voor ons: alleen opzij."""
+    opzij = ["links", "rechts"]
+    return opzij if muur else opzij + ["vooruit", "vooruit", "boog_links", "boog_rechts"]
+
+
+def verticale_opties(hoogte_cm: float, netto_s: float) -> list[str]:
+    """Waarheen kan de drone verticaal? Hoogte 0 = onbekend: dan telt het netto stijgen/dalen."""
+    omhoog = (hoogte_cm <= 0 or hoogte_cm < MAX_ZOEK_CM) and netto_s < MAX_NETTO_S
+    omlaag = (hoogte_cm <= 0 or hoogte_cm > MIN_ZOEK_CM) and netto_s > -MAX_NETTO_S
+    return (["omhoog"] if omhoog else []) + (["omlaag"] if omlaag else [])

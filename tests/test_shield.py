@@ -4,8 +4,10 @@ import pytest
 
 import shield.flight.drone as drone
 from shield.flight.drone import Hoek, Noodstop, Spoor, Vlucht
-from shield.flight.sturing import DOEL_Y, RICHTING, STIL, Rc, corrigeer, naar_marker
-from shield.vision.markers import SCORE_GEVONDEN, Marker, vind_geel, vind_groen
+from shield.flight.sturing import (
+    DOEL_Y, MAX_NETTO_S, MAX_ZOEK_CM, MIN_ZOEK_CM, RICHTING, horizontale_opties, verticale_opties, STIL, Rc, corrigeer, naar_marker,
+)
+from shield.vision.markers import SCORE_GEVONDEN, Marker, vind_geel, vind_groen, vind_roze
 
 GEEL_RGB = (255, 230, 0)
 ROZE_RGB = (255, 60, 160)
@@ -226,10 +228,10 @@ def test_zoek_kruis_beweegt_pas_na_een_lege_scan(monkeypatch):
     monkeypatch.setattr(drone, "ROND_RC", 100)
     vlucht = Vlucht(NepTello(draait=True), Camera(leeg()))
     zijwaarts = []
-    monkeypatch.setattr(vlucht, "nieuwe_plek", lambda ronde: zijwaarts.append(ronde))
+    monkeypatch.setattr(vlucht, "nieuwe_plek", lambda zoeker: zijwaarts.append(1))
     with pytest.raises(Noodstop):
         vlucht.zoek_kruis(vind_geel, max_rondes=3)
-    assert zijwaarts == [0, 1]  # Na elke lege scan behalve de laatste.
+    assert len(zijwaarts) == 2  # Na elke lege scan behalve de laatste.
 
 
 def test_zoek_kruis_beweegt_niet_als_kruis_al_zichtbaar():
@@ -238,14 +240,28 @@ def test_zoek_kruis_beweegt_niet_als_kruis_al_zichtbaar():
     assert vlucht.tello.stappen == []
 
 
-def test_nieuwe_plek_gaat_zijwaarts_bij_muur_en_vooruit_in_open_ruimte(monkeypatch):
-    muur = Vlucht(NepTello(), Camera(np.full((720, 960, 3), 200, dtype=np.uint8)))
-    muur.nieuwe_plek(0)
-    assert any(c[0] > 0 for c in muur.tello.commandos) and not any(c[1] > 0 for c in muur.tello.commandos)
-    open_ruimte = Vlucht(NepTello(), Camera(np.random.default_rng(1).integers(0, 255, (720, 960, 3), dtype=np.uint8)))
-    monkeypatch.setattr(open_ruimte, "vooruit", lambda: open_ruimte.tello.stappen.append(("vooruit", 0)))
-    open_ruimte.nieuwe_plek(0)
-    assert ("vooruit", 0) in open_ruimte.tello.stappen
+def test_bij_een_muur_alleen_opzij():
+    assert set(horizontale_opties(muur=True)) == {"links", "rechts"}
+    assert {"vooruit", "boog_links", "boog_rechts"} <= set(horizontale_opties(muur=False))
+
+
+def test_hoogtegrenzen_voorkomen_te_laag_en_te_hoog():
+    assert verticale_opties(MIN_ZOEK_CM, 0) == ["omhoog"]
+    assert verticale_opties(MAX_ZOEK_CM, 0) == ["omlaag"]
+    assert verticale_opties(100, 0) == ["omhoog", "omlaag"]
+    assert verticale_opties(0, MAX_NETTO_S) == ["omlaag"]  # Hoogte onbekend: netto stijgen is begrensd.
+
+
+def test_nieuwe_plek_gaat_zijwaarts_bij_muur():
+    vlucht = Vlucht(NepTello(), Camera(np.full((720, 960, 3), 200, dtype=np.uint8)))
+    vlucht.nieuwe_plek()
+    assert not any(c[1] > 0 for c in vlucht.tello.commandos)
+
+
+def test_boog_stopt_en_geeft_het_kruis_dat_onderweg_in_beeld_komt():
+    vlucht = Vlucht(NepTello(), Camera(frame_met_kruis(ROZE_RGB)))
+    kruis = vlucht.vooruit(5.0, yaw=25, zoeker=vind_roze)
+    assert kruis is not None and any(c[3] == 25 for c in vlucht.tello.commandos)
 
 
 # --- Naderen en landen ---------------------------------------------------------------

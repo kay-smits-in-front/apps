@@ -2,6 +2,7 @@
 
 import logging
 import math
+import random
 import threading
 import time
 from contextlib import contextmanager
@@ -11,8 +12,8 @@ import numpy as np
 from djitellopy import Tello, TelloException
 
 from shield.flight.sturing import (
-    HERSTEL_RC, HERSTEL_S, HOOGTE_S, MAX_RONDES, RICHTING, ROND_RC, SLOT_SPRONG, SPOOR_SPRONG, START_OMHOOG_S,
-    STIL, ZIJ_S, Rc, corrigeer, naar_marker,
+    BOOG_S, BOOG_YAW, HERSTEL_RC, HERSTEL_S, HOOGTE_S, MAX_RONDES, RICHTING, ROND_RC, SLOT_SPRONG, SPOOR_SPRONG,
+    START_OMHOOG_S, STIL, ZIJ_S, ZOEK_VOORUIT_S, Rc, corrigeer, horizontale_opties, naar_marker, verticale_opties,
 )
 from shield.vision.markers import SCORE_GEVONDEN, Marker
 from shield.vision.muur import MUUR_STOP, muur_aandeel
@@ -122,6 +123,8 @@ class Vlucht:
         self.camera = camera
         self.positie = Positie(tello)
         self.daal_s = DAAL_BUDGET_S
+        self.netto_hoogte_s = 0.0  # Seconden omhoog min omlaag tijdens het zoeken.
+        self.rng = random.Random()
         self.stop = threading.Event()  # Gezet door q: direct landen.
         self.max_afwijking: float | None = None  # None = bewust bewegen, geen afstandslimiet.
 
@@ -161,18 +164,26 @@ class Vlucht:
         stap("stabiliseren")
         self.houd(STIL, STABILISEER_S)
 
-    def vooruit(self, max_s: float = VOORUIT_MAX_S) -> None:
-        """Vlieg vooruit tot de muur het beeld vult (bevestigd) of max_s om is."""
-        stap("vooruit tot muur")
+    def vooruit(self, max_s: float = VOORUIT_MAX_S, yaw: int = 0, zoeker: Zoeker | None = None) -> Marker | None:
+        """Vlieg vooruit (met yaw > 0 of < 0 in een boog) tot de muur het beeld vult of max_s om is.
+
+        Met een zoeker kijkt de drone onderweg mee: een kruis dat BEVESTIG_FRAMES vast in beeld staat stopt de vlucht.
+        """
+        stap("vooruit tot muur" if yaw == 0 else "boog")
         self.nieuw_nulpunt(None)
-        start, muur = time.monotonic(), 0
+        start, muur, spoor, gezien = time.monotonic(), 0, Spoor(SPOOR_SPRONG), None
         while time.monotonic() - start < max_s:
-            muur = muur + 1 if muur_aandeel(self.camera.frame) >= MUUR_STOP else 0
+            frame = self.camera.frame
+            muur = muur + 1 if muur_aandeel(frame) >= MUUR_STOP else 0
+            if zoeker is not None and spoor.volg(zoeker(frame)) >= BEVESTIG_FRAMES:
+                gezien = spoor.laatste
+                break
             if muur >= BEVESTIG_FRAMES:
                 break
-            self.stuur(Rc(0, VOORUIT_RC, 0, 0))
+            self.stuur(Rc(0, VOORUIT_RC, 0, yaw))
             time.sleep(LOOP_TIJD_S)
         self.houd(STIL, 1.0, max_afwijking=None)
+        return gezien
 
     def draai(self, graden: float, richting: int = 1, marge: float = 8, timeout_s: float = 15) -> None:
         """Draai via rc-yaw op de gemeten yaw. 'cw' faalt zonder geldige vision-positie."""
@@ -197,6 +208,7 @@ class Vlucht:
     def beweeg(self, naam: str, seconden: float) -> None:
         """Een korte, begrensde beweging (rechts, links, omhoog, omlaag) met rc, daarna stilhangen."""
         stap(f"{naam} {seconden:.1f} s")
+        self.netto_hoogte_s += seconden * ((naam == "omhoog") - (naam == "omlaag"))
         self.houd(RICHTING[naam], seconden, max_afwijking=None)
         self.houd(STIL, 0.6, max_afwijking=None)
 
@@ -240,23 +252,29 @@ class Vlucht:
         return beste
 
     def zoek_kruis(self, zoeker: Zoeker, max_rondes: int = MAX_RONDES) -> Marker:
-        """Scan eerst de hele ruimte. Gevonden: draai ernaartoe. Niets: een stap en opnieuw scannen."""
+        """Scan eerst de hele ruimte. Gevonden: draai ernaartoe. Niets: ergens anders heen en opnieuw."""
         for ronde in range(max_rondes):
             stap(f"scan {ronde + 1} van {max_rondes}")
             if (waarneming := self.scan360(zoeker)) is not None:
                 self.draai_naar(waarneming.graden)
                 return waarneming.marker
-            if ronde < max_rondes - 1:
-                self.nieuwe_plek(ronde)
+            if ronde < max_rondes - 1 and (onderweg := self.nieuwe_plek(zoeker)) is not None:
+                return onderweg  # Tijdens het verplaatsen al gezien: meteen vergrendelen.
         raise Noodstop("Geen kruis gevonden.")
 
-    def nieuwe_plek(self, ronde: int) -> None:
-        """Niets gezien: vooruit (stopt bij een muur), anders links of rechts. Wissel ook van hoogte."""
-        if self.muur_voor():
-            self.beweeg("rechts" if ronde % 2 == 0 else "links", ZIJ_S)
+    def nieuwe_plek(self, zoeker: Zoeker | None = None) -> Marker | None:
+        """Willekeurige horizontale stap (vooruit, opzij of boog) plus een stap omhoog of omlaag binnen de grenzen."""
+        keuze = self.rng.choice(horizontale_opties(self.muur_voor()))
+        gezien = None
+        if keuze == "vooruit":
+            gezien = self.vooruit(ZOEK_VOORUIT_S, zoeker=zoeker)
+        elif keuze.startswith("boog"):
+            gezien = self.vooruit(BOOG_S, yaw=BOOG_YAW if keuze == "boog_rechts" else -BOOG_YAW, zoeker=zoeker)
         else:
-            self.vooruit()
-        self.beweeg("omlaag" if ronde % 2 == 0 else "omhoog", HOOGTE_S)
+            self.beweeg(keuze, ZIJ_S)
+        if gezien is None and (hoogte := verticale_opties(self.tello.get_height(), self.netto_hoogte_s)):
+            self.beweeg(self.rng.choice(hoogte), HOOGTE_S)
+        return gezien
 
     def begrens_dalen(self, rc: Rc) -> Rc:
         """Daal in totaal maximaal DAAL_BUDGET_S en nooit onder MIN_HOOGTE_CM (als de meting klopt)."""
