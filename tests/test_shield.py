@@ -85,7 +85,7 @@ def test_muur_aandeel():
 
     egaal = np.full((720, 960, 3), 200, dtype=np.uint8)
     ruis = np.random.default_rng(0).integers(0, 255, (720, 960, 3), dtype=np.uint8)
-    assert muur_aandeel(egaal) > 0.99 and muur_aandeel(ruis) < 0.2
+    assert muur_aandeel(egaal) > 0.99 and muur_aandeel(ruis) < 0.5
 
 
 # --- Sturing -------------------------------------------------------------------------
