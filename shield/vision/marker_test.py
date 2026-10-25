@@ -1,4 +1,4 @@
-"""Alleen camera: toont live of de Tello geel en groen ziet. Geen opstijgen, geen vluchtcommando's.
+"""Alleen camera: toont live of de Tello roze ziet. Geen opstijgen, geen vluchtcommando's.
 
 Start vanuit de projectroot:
     python -m shield.vision.marker_test
@@ -9,7 +9,7 @@ Vensters: kleurbeeld met kaders, en de maskers. q = stoppen.
 import cv2
 from djitellopy import Tello
 
-from shield.vision.markers import GEEL, GROEN
+from shield.vision.markers import ROZE
 
 MIN_OPPERVLAK_PX = 100
 
@@ -35,13 +35,10 @@ def main() -> None:
             # Het Tello-frame is RGB: zo krijg je correcte kleuren (anders is alles blauwig).
             hsv = cv2.cvtColor(beeld, cv2.COLOR_RGB2HSV)
             scherm = cv2.cvtColor(beeld, cv2.COLOR_RGB2BGR)
-            geel_masker = cv2.inRange(hsv, *GEEL)
-            groen_masker = cv2.inRange(hsv, *GROEN)
-            teken_kaders(scherm, geel_masker, "GEEL", (0, 255, 255))
-            teken_kaders(scherm, groen_masker, "GROEN", (0, 255, 0))
-            cv2.imshow("Tello - herkenning geel en groen (q = stoppen)", scherm)
-            cv2.imshow("Geel masker", geel_masker)
-            cv2.imshow("Groen masker", groen_masker)
+            roze_masker = cv2.inRange(hsv, *ROZE)
+            teken_kaders(scherm, roze_masker, "ROZE", (255, 0, 255))
+            cv2.imshow("Tello - herkenning roze (q = stoppen)", scherm)
+            cv2.imshow("Roze masker", roze_masker)
             if cv2.waitKey(1) == ord("q"):
                 break
     finally:

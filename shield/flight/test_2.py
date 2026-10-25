@@ -1,4 +1,4 @@
-"""Test 2: opstijgen, kleine stijging, 360-graden scan, naar het groene kruis vliegen en erop landen.
+"""Test 2: opstijgen, kleine stijging, 360-graden scan, naar het roze kruis vliegen en erop landen.
 
 Start vanuit de projectroot:
     python -m shield.flight.test_2
@@ -8,14 +8,14 @@ Het live beeld opent eerst. SPATIE in het venster = opstijgen, q = direct landen
 
 from shield.flight.drone import Vlucht
 from shield.flight.runner import voer_uit
-from shield.vision.markers import vind_groen
+from shield.vision.markers import vind_roze
 
 
 def plan(vlucht: Vlucht) -> None:
     vlucht.opstijgen()
     vlucht.kleine_stijging()
-    kruis = vlucht.zoek_kruis(vind_groen)
-    vlucht.vlieg_en_land(vind_groen, vast=kruis)
+    kruis = vlucht.zoek_kruis(vind_roze)
+    vlucht.vlieg_en_land(vind_roze, vast=kruis)
 
 
 if __name__ == "__main__":

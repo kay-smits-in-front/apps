@@ -32,6 +32,8 @@ SCORE_GEVONDEN = 0.8  # Vanaf hier is het een kruis: minstens 5 van de 6 eisen k
 # ligt onder warm licht rond hue 10-18.
 GEEL = ((22, 70, 70), (40, 255, 255))
 GROEN = ((35, 45, 40), (90, 255, 255))
+# Roze/magenta ligt op hue 145-175: boven de blauwpaarse muur (hue ~120-130) en onder rood (hue 0-10, 175+).
+ROZE = ((145, 70, 80), (175, 255, 255))
 
 _PUNTEN = 72
 _HOEK = np.linspace(0, 2 * np.pi, _PUNTEN, endpoint=False)
@@ -137,3 +139,7 @@ def vind_geel(frame_rgb: np.ndarray) -> Marker | None:
 
 def vind_groen(frame_rgb: np.ndarray) -> Marker | None:
     return vind_marker(frame_rgb, GROEN)
+
+
+def vind_roze(frame_rgb: np.ndarray) -> Marker | None:
+    return vind_marker(frame_rgb, ROZE)

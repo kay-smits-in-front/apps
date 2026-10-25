@@ -8,6 +8,7 @@ from shield.flight.sturing import DOEL_Y, RICHTING, STIL, Rc, corrigeer, naar_ma
 from shield.vision.markers import SCORE_GEVONDEN, Marker, vind_geel, vind_groen
 
 GEEL_RGB = (255, 230, 0)
+ROZE_RGB = (255, 60, 160)
 GROEN_RGB = (0, 200, 0)
 
 
@@ -74,7 +75,7 @@ def test_oranje_vloer_is_geen_geel():
 def test_live_beeld_tekent_herkend_kruis():
     from shield.vision.live import teken
 
-    frame = frame_met_kruis(GEEL_RGB)
+    frame = frame_met_kruis(ROZE_RGB)
     zonder = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
     assert (teken(frame) != zonder).any()
     assert (teken(leeg()) == 0).all()
@@ -300,3 +301,20 @@ def test_bewaar_schrijft_een_leesbare_jpg(tmp_path):
 
     pad = bewaar(frame_met_kruis(GEEL_RGB), map=tmp_path)
     assert cv2.imread(str(pad)).shape == (720, 960, 3)
+
+
+
+
+
+def test_roze_kruis_wordt_herkend_en_geel_en_groen_niet():
+    from shield.vision.markers import vind_roze
+
+    assert vind_roze(frame_met_kruis(ROZE_RGB)).score >= SCORE_GEVONDEN
+    assert vind_roze(frame_met_kruis(GEEL_RGB)) is None and vind_roze(frame_met_kruis(GROEN_RGB)) is None
+
+
+def test_blauwpaarse_muur_is_geen_roze():
+    from shield.vision.markers import vind_roze
+
+    muur = np.full((720, 960, 3), (90, 80, 140), dtype=np.uint8)
+    assert vind_roze(muur) is None
