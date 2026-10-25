@@ -1,6 +1,7 @@
 """Voert een vluchtplan uit met live beeld vooraf: SPATIE = opstijgen, q = stoppen en landen."""
 
 import threading
+import traceback
 from typing import Callable
 
 from shield.flight.drone import Noodstop, Vlucht, stap, vlucht_met_camera
@@ -19,6 +20,9 @@ def werk(plan: Plan, vlucht: Vlucht, live: LiveBeeld) -> None:
         plan(vlucht)
     except Noodstop as reden:
         print(f"NOODSTOP: {reden}")
+    except Exception as fout:  # Elke andere fout: melden; daarna landt vlucht_met_camera.
+        print(f"FOUT: {type(fout).__name__}: {fout}")
+        traceback.print_exc()
 
 
 def voer_uit(plan: Plan) -> None:

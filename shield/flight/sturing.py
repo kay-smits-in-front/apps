@@ -13,6 +13,12 @@ VOORUIT_SNEL = 15
 MAX_DAAL = -20
 MAX_STIJG = 0  # Tijdens het naderen alleen dalen, nooit stijgen.
 CENTREER_X = 0.25  # Alleen vooruit vliegen als het kruis minstens zo dicht bij het midden staat.
+NAAST_STRAAL = 0.20  # Kruis zo groot (halve breedte als aandeel van het beeld, ~40-50 cm): stop ervoor.
+REMMEN_STRAAL = 0.10  # Vanaf deze grootte rustiger vooruit.
+VOORUIT_LANGZAAM = 8
+EINDE_ONDERIN_Y = 0.55  # Kruis onderin beeld verdwenen na deze hoogte: we zijn erboven.
+MIN_STRAAL_BIJ_VERLIES = 0.04  # ...maar alleen als het kruis eerst groot genoeg in beeld was.
+OVER_HET_KRUIS_S = 0.8  # Daarna zo lang nog vooruit voor we landen.
 ROND_RC = 30  # Draaisnelheid bij rondkijken (ongeveer graden per seconde).
 MAX_RC = 100
 
@@ -64,8 +70,19 @@ def naar_marker(marker: Marker) -> Rc:
     """Draai naar het kruis, vlieg vooruit als het in het midden staat, houd het op DOEL_Y."""
     yaw = begrens(KP_YAW * marker.x)
     ud = int(np.clip(-KP_HOOGTE * (marker.y - DOEL_Y), MAX_DAAL, MAX_STIJG))
-    fb = VOORUIT_SNEL if abs(marker.x) < CENTREER_X else 0
+    snelheid = VOORUIT_LANGZAAM if marker.straal >= REMMEN_STRAAL else VOORUIT_SNEL
+    fb = snelheid if abs(marker.x) < CENTREER_X else 0
     return Rc(0, fb, ud, yaw)
+
+
+def is_dichtbij(marker: Marker) -> bool:
+    """Is het kruis zo groot in beeld dat we er vlak voor staan? (Ook voor een kruis op een muur of kast.)"""
+    return marker.straal >= NAAST_STRAAL
+
+
+def is_erboven_verdwenen(laatste: Marker | None) -> bool:
+    """Verdween het kruis onderin het beeld, nadat we het van dichtbij zagen? Dan vliegen we erboven."""
+    return laatste is not None and laatste.y >= EINDE_ONDERIN_Y and laatste.straal >= MIN_STRAAL_BIJ_VERLIES
 
 
 def demping(vx: float, vy: float) -> Rc:

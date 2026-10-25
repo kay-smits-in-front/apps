@@ -13,7 +13,8 @@ from djitellopy import Tello, TelloException
 
 from shield.flight.sturing import (
     BOOG_S, BOOG_YAW, HERSTEL_RC, HERSTEL_S, HOOGTE_S, MAX_RONDES, RICHTING, ROND_RC, SLOT_SPRONG, SPOOR_SPRONG,
-    START_OMHOOG_S, STIL, ZIJ_S, ZOEK_VOORUIT_S, Rc, corrigeer, horizontale_opties, naar_marker, verticale_opties,
+    CENTREER_X, OVER_HET_KRUIS_S, START_OMHOOG_S, STIL, ZIJ_S, ZOEK_VOORUIT_S, Rc, corrigeer, horizontale_opties,
+    is_dichtbij, is_erboven_verdwenen, naar_marker, verticale_opties,
 )
 from shield.vision.markers import SCORE_GEVONDEN, Marker
 from shield.vision.muur import MUUR_STOP, muur_aandeel
@@ -25,7 +26,8 @@ LOOP_TIJD_S = 0.03
 LANDEN_Y = 0.7  # Kruis zo laag in beeld (en gecentreerd): we zijn er bijna.
 LAATSTE_CM = 20  # Laatste stuk vooruit met het kruis onder de camera uit beeld.
 MIN_NADER_S = 1.5  # Nooit landen voor we minstens zo lang naar het kruis zijn gevlogen.
-BEVESTIG_FRAMES = 5  # Een kruis telt pas als hij zo vaak achter elkaar is gezien.
+BEVESTIG_FRAMES = 5
+AANKOMST_FRAMES = 3  # Zo veel beelden achter elkaar moet het kruis 'dichtbij' zijn.  # Een kruis telt pas als hij zo vaak achter elkaar is gezien.
 KWIJT_FRAMES = 8  # Zo lang kwijt = onder de camera verdwenen of echt weg.
 STABILISEER_S = 1.0
 VOORUIT_RC = 20  # Was 40 x 2.5 s: te ver en te hard.
@@ -289,33 +291,43 @@ class Vlucht:
     def vlieg_en_land(
         self, zoeker: Zoeker, vast: Marker | None = None, timeout_s: float = 40, min_nader_s: float = MIN_NADER_S
     ) -> None:
-        """Vergrendel op het kruis, vlieg ernaartoe op een vaste route en land.
+        """Vergrendel op het kruis, vlieg ernaartoe, en land bij aankomst.
 
-        Vergrendeld: alleen een kruis dat bij het vorige past telt; een ander kruis elders in beeld wordt genegeerd.
-        Route: naar het kruis draaien, vooruit zodra het in het midden staat, dalen als het te laag in beeld komt.
+        Naderen: draai zodat het kruis midden in beeld blijft, vlieg vooruit als het gecentreerd is, daal als het
+        te laag in beeld komt, en ga rustiger vooruit naarmate het kruis groter wordt. Een kruis dat ver van het
+        vorige ligt wordt genegeerd (vergrendeld).
+        Aangekomen als:
+          - het kruis zo groot in beeld is dat we er vlak voor staan (ook een kruis op een muur): land direct;
+          - het kruis onderin het beeld verdwijnt nadat we het van dichtbij zagen: nog even vooruit, dan landen;
+          - het kruis staat laag en gecentreerd in beeld (BEVESTIG_FRAMES achter elkaar): nog even vooruit, dan landen.
         """
         stap("vergrendeld, naar het kruis")
         self.nieuw_nulpunt(None)
         start = time.monotonic()
         slot, laatste = Spoor(SLOT_SPRONG), vast
         slot.laatste = vast
-        rc, nabij, kwijt, herstel_start = STIL, 0, 0, None
-        while time.monotonic() - start < timeout_s:
+        rc, laag, dichtbij, kwijt, herstel_start = STIL, 0, 0, 0, None
+        reden: str | None = None
+        while time.monotonic() - start < timeout_s and reden is None:
             marker = zoeker(self.camera.frame)
             genoeg_tijd = time.monotonic() - start >= min_nader_s
             if marker is not None and marker.score >= SCORE_GEVONDEN and slot.past(marker):
                 kwijt, laatste, herstel_start, slot.laatste = 0, marker, None, marker
-                nabij = nabij + 1 if abs(marker.x) < 0.25 and marker.y > LANDEN_Y else 0
-                if nabij >= BEVESTIG_FRAMES and genoeg_tijd:
-                    break
-                rc = self.begrens_dalen(naar_marker(marker))
-                self.stuur(rc)
+                dichtbij = dichtbij + 1 if is_dichtbij(marker) else 0
+                laag = laag + 1 if abs(marker.x) < CENTREER_X and marker.y > LANDEN_Y else 0
+                if dichtbij >= AANKOMST_FRAMES:
+                    reden = "voor"
+                elif laag >= BEVESTIG_FRAMES and genoeg_tijd:
+                    reden = "erboven"
+                else:
+                    rc = self.begrens_dalen(naar_marker(marker))
+                    self.stuur(rc)
             else:
-                kwijt, nabij = kwijt + 1, 0
+                kwijt, laag, dichtbij = kwijt + 1, 0, 0
                 if kwijt < KWIJT_FRAMES:
                     self.stuur(rc)  # Kort kwijt: koers houden.
-                elif laatste is not None and laatste.y > LANDEN_Y - 0.15 and genoeg_tijd:
-                    break  # Onderin beeld verdwenen: we zijn erboven.
+                elif is_erboven_verdwenen(laatste):
+                    reden = "erboven"
                 elif herstel_start is None or time.monotonic() - herstel_start < HERSTEL_S:
                     herstel_start = herstel_start or time.monotonic()
                     slot.laatste = None  # Ontgrendel: elk goed kruis mag weer.
@@ -324,14 +336,16 @@ class Vlucht:
                 else:
                     raise Noodstop("Kruis kwijt.")
             time.sleep(LOOP_TIJD_S)
-        else:
+        if reden is None:
             raise Noodstop("Niet op tijd bij het kruis.")
-        stap("laatste stuk en landen")
+        self.land_bij_kruis(reden)
+
+    def land_bij_kruis(self, reden: str) -> None:
+        """Landen bij aankomst. 'erboven': nog even vooruit (rc, geen move_*), 'voor': meteen landen."""
+        stap(f"aangekomen ({reden}), landen")
+        if reden == "erboven":
+            self.houd(Rc(0, VOORUIT_RC, 0, 0), OVER_HET_KRUIS_S, max_afwijking=None)
         self.stuur(STIL)
-        try:
-            self.tello.move_forward(LAATSTE_CM)
-        except TelloException:
-            pass  # Landen op de plek waar we nu zijn is beter dan niet landen.
         self.tello.land()
 
 

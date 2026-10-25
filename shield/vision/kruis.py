@@ -20,6 +20,6 @@ def vind_roze_kruis(frame_rgb: np.ndarray) -> Marker | None:
     """Beste roze kruis in een RGB-frame, of None."""
     vlek, lijnen = vind_roze(frame_rgb), vind_kruis_lijnen(frame_rgb)
     if vlek and lijnen and vlek.score >= SCORE_GEVONDEN and zelfde_plek(vlek, lijnen):
-        return lijnen._replace(oppervlak=vlek.oppervlak, score=1.0)  # Lijnen geven het nauwkeurigste midden.
+        return lijnen._replace(oppervlak=vlek.oppervlak, score=1.0, straal=max(lijnen.straal, vlek.straal))
     kandidaten = [m for m in (vlek, lijnen) if m is not None]
     return max(kandidaten, key=lambda m: m.score, default=None)

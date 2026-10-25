@@ -49,6 +49,7 @@ class Marker(NamedTuple):
     y: float
     oppervlak: float  # Aandeel van het beeld (0..1).
     score: float = 1.0  # Hoe goed de vorm een kruis is (0..1).
+    straal: float = 0.0  # Halve grootte van het kruis als aandeel van de beeldbreedte (0 = onbekend).
 
 
 def verklein(frame_rgb: np.ndarray) -> np.ndarray:
@@ -125,7 +126,7 @@ def marker_uit_masker(masker: np.ndarray) -> Marker | None:
         vlek = labels[ya:yb, xa:xb] == i
         s = kruis_score(vlek, cx - xa, cy - ya, int(oppervlak))
         if s >= SCORE_TONEN and (beste is None or s > beste.score):
-            beste = Marker(cx / breedte * 2 - 1, cy / hoogte * 2 - 1, oppervlak / (hoogte * breedte), s)
+            beste = Marker(cx / breedte * 2 - 1, cy / hoogte * 2 - 1, oppervlak / (hoogte * breedte), s, max(b, h) / 2 / breedte)
     return beste
 
 

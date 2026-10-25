@@ -5,7 +5,7 @@ import pytest
 import shield.flight.drone as drone
 from shield.flight.drone import Hoek, Noodstop, Spoor, Vlucht
 from shield.flight.sturing import (
-    DOEL_Y, MAX_NETTO_S, MAX_ZOEK_CM, MIN_ZOEK_CM, RICHTING, horizontale_opties, verticale_opties, STIL, Rc, corrigeer, naar_marker,
+    DOEL_Y, is_dichtbij, is_erboven_verdwenen, MAX_NETTO_S, MAX_ZOEK_CM, MIN_ZOEK_CM, RICHTING, horizontale_opties, verticale_opties, STIL, Rc, corrigeer, naar_marker,
 )
 from shield.vision.markers import SCORE_GEVONDEN, Marker, vind_geel, vind_groen, vind_roze
 
@@ -278,7 +278,8 @@ def test_vliegt_naar_het_kruis_en_landt_niet_op_een_ander_punt():
 def test_landt_na_het_naderen_als_kruis_gecentreerd_onderin_staat():
     vlucht = Vlucht(NepTello(), Camera(frame_met_kruis(GEEL_RGB, cy=640)))
     vlucht.vlieg_en_land(vind_geel, timeout_s=3, min_nader_s=0)
-    assert vlucht.tello.stappen == [("forward", 20)] and vlucht.tello.geland
+    assert vlucht.tello.geland and vlucht.tello.stappen == []  # Geen move_*: alleen rc vooruit en landen.
+    assert any(c[1] > 0 for c in vlucht.tello.commandos)
 
 
 def test_landt_niet_voordat_er_genaderd_is():
@@ -377,3 +378,52 @@ def test_gecombineerd_vindt_een_dik_kruis_op_een_witte_ondergrond():
     wit[kruis.sum(axis=2) > 0] = kruis[kruis.sum(axis=2) > 0]
     gevonden = vind_roze_kruis(wit)
     assert gevonden is not None and gevonden.score >= SCORE_GEVONDEN
+
+
+# --- Aankomst bij het kruis ---------------------------------------------------------
+
+
+def test_dichtbij_is_een_groot_kruis_ook_als_het_op_een_muur_staat():
+    assert is_dichtbij(Marker(0, 0, 0.01, 1.0, straal=0.25))
+    assert not is_dichtbij(Marker(0, 0, 0.01, 1.0, straal=0.08))
+
+
+def test_erboven_verdwenen_alleen_na_een_kruis_dat_onderin_en_groot_genoeg_was():
+    assert is_erboven_verdwenen(Marker(0, 0.7, 0.01, 1.0, straal=0.1))
+    assert not is_erboven_verdwenen(Marker(0, 0.1, 0.01, 1.0, straal=0.1))  # Midden in beeld verdwenen: niet erboven.
+    assert not is_erboven_verdwenen(Marker(0, 0.7, 0.0, 1.0, straal=0.01))  # Een stipje: geen kruis van dichtbij.
+    assert not is_erboven_verdwenen(None)
+
+
+def test_naar_marker_gaat_rustiger_vooruit_als_het_kruis_groot_wordt():
+    ver, dichtbij = naar_marker(Marker(0, 0.5, 0.0, 1.0, 0.03)), naar_marker(Marker(0, 0.5, 0.0, 1.0, 0.15))
+    assert 0 < dichtbij.fb < ver.fb
+
+
+def test_land_direct_voor_een_groot_kruis_op_een_muur():
+    wit = np.full((720, 960, 3), 235, dtype=np.uint8)
+    kruis = frame_met_kruis(ROZE_RGB, lengte=200, dikte=30)
+    wit[kruis.sum(axis=2) > 0] = kruis[kruis.sum(axis=2) > 0]
+    vlucht = Vlucht(NepTello(), Camera(wit))
+    from shield.vision.kruis import vind_roze_kruis
+
+    vlucht.vlieg_en_land(vind_roze_kruis, timeout_s=3, min_nader_s=5)
+    vooruit = sum(1 for c in vlucht.tello.commandos if c[1] > 0)
+    assert vlucht.tello.geland and vlucht.tello.commandos[-1] == (0, 0, 0, 0) and vooruit < 6  # Geen extra stuk vooruit.
+
+
+def test_kruis_verdwijnt_onderin_na_nadering_dan_nog_even_vooruit_en_landen():
+    class Verdwijnend:
+        def __init__(self):
+            self.n = 0
+
+        @property
+        def frame(self):
+            self.n += 1
+            return frame_met_kruis(ROZE_RGB, cy=600, lengte=80) if self.n <= 6 else leeg()
+
+    from shield.vision.kruis import vind_roze_kruis
+
+    vlucht = Vlucht(NepTello(), Verdwijnend())
+    vlucht.vlieg_en_land(vind_roze_kruis, timeout_s=5, min_nader_s=0)
+    assert vlucht.tello.geland
