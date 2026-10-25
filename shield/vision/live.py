@@ -1,6 +1,8 @@
 """Live RGB-beeld op de laptop, met een markering waar geel en groen worden herkend."""
 
 import threading
+import time
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -9,6 +11,7 @@ from shield.vision.markers import SCORE_GEVONDEN, vind_geel, vind_groen
 from shield.vision.muur import muur_aandeel
 
 VENSTER = "SHIELD live (q = sluiten)"
+OPNAMEN = Path("shield/flight/opnames")
 KLEUREN = (("GEEL", vind_geel, (0, 255, 255)), ("GROEN", vind_groen, (0, 255, 0)))  # BGR
 
 
@@ -25,13 +28,21 @@ def teken(frame_rgb: np.ndarray) -> np.ndarray:
     return scherm
 
 
+def bewaar(frame_rgb: np.ndarray, map: Path = OPNAMEN) -> Path:
+    """Sla een RGB-frame op als jpg (zonder markering), zodat de detector er later op getest kan worden."""
+    map.mkdir(parents=True, exist_ok=True)
+    pad = map / f"{time.strftime('%H%M%S')}_{int(time.time() * 1000) % 1000:03d}.jpg"
+    cv2.imwrite(str(pad), cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR))
+    return pad
+
+
 class LiveBeeld:
     """Live beeld in de hoofdthread (dat is de betrouwbare plek voor OpenCV-vensters).
 
-    Toetsen: SPATIE zet `start`, q zet `stop` (en `start`, zodat wachtende code vrijkomt).
+    Toetsen: SPATIE zet `start`, f slaat het huidige beeld op, q zet `stop` (en `start`, zodat wachtende code vrijkomt).
     """
 
-    HINT = "SPATIE = opstijgen | q = stoppen en landen"
+    HINT = "SPATIE = opstijgen | f = beeld opslaan | q = stoppen en landen"
 
     def __init__(self, camera) -> None:
         self.camera = camera
@@ -49,6 +60,8 @@ class LiveBeeld:
             toets = cv2.waitKey(30) & 0xFF
             if toets == ord(" "):
                 self.start.set()
+            elif toets == ord("f") and frame is not None:
+                print(f"opgeslagen: {bewaar(frame)}")
             elif toets == ord("q"):
                 self.stop.set()
                 self.start.set()

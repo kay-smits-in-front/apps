@@ -3,8 +3,8 @@ import numpy as np
 import pytest
 
 import shield.flight.drone as drone
-from shield.flight.drone import Hoek, Noodstop, Vlucht
-from shield.flight.sturing import DOEL_Y, STIL, Rc, corrigeer, naar_marker, uitkijkpunten
+from shield.flight.drone import Hoek, Noodstop, Spoor, Vlucht
+from shield.flight.sturing import DOEL_Y, RICHTING, STIL, Rc, corrigeer, naar_marker
 from shield.vision.markers import SCORE_GEVONDEN, Marker, vind_geel, vind_groen
 
 GEEL_RGB = (255, 230, 0)
@@ -103,10 +103,17 @@ def test_demping_alleen_op_assen_zonder_commando():
     assert corrigeer(Rc(0, 0, 0, 0), vx=0, vy=2).lr != 0
 
 
-def test_uitkijkpunten_stijgen_dalen_links_rechts():
-    richtingen = {r for r, _ in uitkijkpunten()}
-    assert richtingen == {"up", "down", "left", "right"}
-    assert all(cm >= 20 for _, cm in uitkijkpunten())  # Minimale stap van de drone.
+def test_richtingen_zijn_links_rechts_omhoog_omlaag():
+    assert set(RICHTING) == {"links", "rechts", "omhoog", "omlaag"}
+    assert RICHTING["rechts"].lr > 0 > RICHTING["links"].lr
+    assert RICHTING["omhoog"].ud > 0 > RICHTING["omlaag"].ud
+
+
+def test_spoor_telt_alleen_door_bij_een_kruis_dat_op_dezelfde_plek_blijft():
+    spoor = Spoor(0.25)
+    assert [spoor.volg(Marker(0.0, 0.0, 100, 1.0)) for _ in range(3)] == [1, 2, 3]
+    assert spoor.volg(Marker(0.8, 0.0, 100, 1.0)) == 1  # Ander kruis elders: opnieuw beginnen.
+    assert spoor.volg(Marker(0.8, 0.0, 100, 0.4)) == 0  # Te lage score: spoor weg.
 
 
 def test_hoek_telt_door_over_de_180_grens():
@@ -185,40 +192,59 @@ def test_vooruit_stopt_bij_muur_en_gaat_door_in_open_ruimte():
     assert vooruit(bij_muur) <= 5 < vooruit(in_open)
 
 
-# --- Rondkijken en zoeken ------------------------------------------------------------
+# --- Scannen en zoeken --------------------------------------------------------------
 
 
-def test_rondkijken_stopt_zodra_het_kruis_zichtbaar_is():
+def test_scan_vindt_het_kruis_en_onthoudt_de_richting():
     vlucht = Vlucht(NepTello(draait=True), Camera(frame_met_kruis(GEEL_RGB)))
-    assert vlucht.rondkijken(vind_geel) is not None
+    waarneming = vlucht.scan360(vind_geel, snelheid=100)
+    assert waarneming is not None and waarneming.marker.score >= 0.8
     assert vlucht.tello.commandos[-1] == (0, 0, 0, 0)
 
 
-def test_rondkijken_draait_een_hele_ronde_zonder_kruis():
+def test_scan_draait_een_hele_ronde_zonder_kruis():
     vlucht = Vlucht(NepTello(draait=True), Camera(leeg()))
-    assert vlucht.rondkijken(vind_geel, snelheid=100) is None
+    assert vlucht.scan360(vind_geel, snelheid=100) is None
     assert sum(c[3] for c in vlucht.tello.commandos if c[3] > 0) * 0.2 >= 340
 
 
-def test_rondkijken_negeert_een_boek():
+def test_scan_negeert_een_boek():
     boek = leeg()
     boek[300:420, 380:600] = GROEN_RGB
-    assert Vlucht(NepTello(draait=True), Camera(boek)).rondkijken(vind_groen, snelheid=100) is None
+    assert Vlucht(NepTello(draait=True), Camera(boek)).scan360(vind_groen, snelheid=100) is None
 
 
-def test_zoek_kruis_wisselt_van_standpunt_als_niets_gezien(monkeypatch):
+def test_draai_naar_kiest_de_kortste_kant():
+    links, rechts = NepTello(draait=True), NepTello(draait=True)
+    Vlucht(links, camera=None).draai_naar(300)
+    Vlucht(rechts, camera=None).draai_naar(60)
+    assert any(c[3] < 0 for c in links.commandos) and all(c[3] >= 0 for c in rechts.commandos)
+
+
+def test_zoek_kruis_beweegt_pas_na_een_lege_scan(monkeypatch):
     monkeypatch.setattr(drone, "ROND_RC", 100)
-    monkeypatch.setattr(drone, "uitkijkpunten", lambda: [("up", 20), ("right", 30)])
     vlucht = Vlucht(NepTello(draait=True), Camera(leeg()))
+    zijwaarts = []
+    monkeypatch.setattr(vlucht, "nieuwe_plek", lambda ronde: zijwaarts.append(ronde))
     with pytest.raises(Noodstop):
-        vlucht.zoek_kruis(vind_geel)
-    assert vlucht.tello.stappen == [("up", 20), ("right", 30)]
+        vlucht.zoek_kruis(vind_geel, max_rondes=3)
+    assert zijwaarts == [0, 1]  # Na elke lege scan behalve de laatste.
 
 
 def test_zoek_kruis_beweegt_niet_als_kruis_al_zichtbaar():
     vlucht = Vlucht(NepTello(draait=True), Camera(frame_met_kruis(GEEL_RGB)))
     assert vlucht.zoek_kruis(vind_geel) is not None
     assert vlucht.tello.stappen == []
+
+
+def test_nieuwe_plek_gaat_zijwaarts_bij_muur_en_vooruit_in_open_ruimte(monkeypatch):
+    muur = Vlucht(NepTello(), Camera(np.full((720, 960, 3), 200, dtype=np.uint8)))
+    muur.nieuwe_plek(0)
+    assert any(c[0] > 0 for c in muur.tello.commandos) and not any(c[1] > 0 for c in muur.tello.commandos)
+    open_ruimte = Vlucht(NepTello(), Camera(np.random.default_rng(1).integers(0, 255, (720, 960, 3), dtype=np.uint8)))
+    monkeypatch.setattr(open_ruimte, "vooruit", lambda: open_ruimte.tello.stappen.append(("vooruit", 0)))
+    open_ruimte.nieuwe_plek(0)
+    assert ("vooruit", 0) in open_ruimte.tello.stappen
 
 
 # --- Naderen en landen ---------------------------------------------------------------
@@ -259,3 +285,18 @@ def test_daalbudget_begrenst_het_dalen():
     assert vlucht.begrens_dalen(Rc(0, 0, -20, 0)).ud == -20
     vlucht.daal_s = 0
     assert vlucht.begrens_dalen(Rc(0, 0, -20, 0)).ud == 0
+
+
+def test_vergrendeld_negeert_een_kruis_dat_ver_van_het_slot_staat():
+    slot = Marker(-0.6, 0.0, 100, 1.0)
+    vlucht = Vlucht(NepTello(), Camera(frame_met_kruis(GEEL_RGB, cx=700, cy=300)))  # Kruis rechts van het slot.
+    with pytest.raises(Noodstop):
+        vlucht.vlieg_en_land(vind_geel, vast=slot, timeout_s=0.3)
+    assert not any(c[1] > 0 for c in vlucht.tello.commandos)  # Niet vooruit gevlogen naar een ander kruis.
+
+
+def test_bewaar_schrijft_een_leesbare_jpg(tmp_path):
+    from shield.vision.live import bewaar
+
+    pad = bewaar(frame_met_kruis(GEEL_RGB), map=tmp_path)
+    assert cv2.imread(str(pad)).shape == (720, 960, 3)

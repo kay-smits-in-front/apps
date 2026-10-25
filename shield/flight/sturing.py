@@ -11,14 +11,22 @@ KP_YAW = 45.0
 KP_HOOGTE = 40.0
 VOORUIT_SNEL = 15
 MAX_DAAL = -20
-MAX_STIJG = 20
+MAX_STIJG = 0  # Tijdens het naderen alleen dalen, nooit stijgen.
 CENTREER_X = 0.25  # Alleen vooruit vliegen als het kruis minstens zo dicht bij het midden staat.
 ROND_RC = 30  # Draaisnelheid bij rondkijken (ongeveer graden per seconde).
 MAX_RC = 100
 
-# Standpunten voor het rondkijken, na het eerste rondje: stijgen, dalen, rechts, stijgen, links, dalen.
-# Samen een raster van 2 hoogtes x 3 plekken rond het startpunt. Move-commando's: minimaal 20 cm.
-UITKIJKPUNTEN = (("up", 20), ("down", 40), ("right", 30), ("up", 40), ("left", 60), ("down", 40))
+# Vluchtplan: kleine stijging, 360-graden scan, dan beslissen. Alles met limieten.
+START_OMHOOG_S = 0.8  # Kleine stijging voor de eerste scan.
+ZIJ_RC = 30
+ZIJ_S = 1.2  # Eén zijwaartse stap (als er vooruit een muur staat).
+HOOGTE_RC = 30
+HOOGTE_S = 0.7  # Eén stap omhoog of omlaag tussen twee scans.
+MAX_RONDES = 5  # Maximaal aantal scans voor we opgeven.
+HERSTEL_RC = 25  # Draaisnelheid om een kwijtgeraakt kruis terug te vinden.
+HERSTEL_S = 2.5
+SPOOR_SPRONG = 0.25  # Zo ver mag een kruis tussen twee beelden verspringen tijdens de scan (-1..1).
+SLOT_SPRONG = 0.35  # Idem tijdens het naderen: een kruis dat verder springt is een ander kruis.
 
 
 class Rc(NamedTuple):
@@ -65,6 +73,9 @@ def corrigeer(rc: Rc, vx: float, vy: float) -> Rc:
     return Rc(rc.lr or d.lr, rc.fb or d.fb, rc.ud, rc.yaw)
 
 
-def uitkijkpunten() -> list[tuple[str, int]]:
-    """Volgorde van (richting, cm) voor het wisselen van standpunt; richting = move_<richting>."""
-    return list(UITKIJKPUNTEN)
+RICHTING = {
+    "rechts": Rc(ZIJ_RC, 0, 0, 0),
+    "links": Rc(-ZIJ_RC, 0, 0, 0),
+    "omhoog": Rc(0, 0, HOOGTE_RC, 0),
+    "omlaag": Rc(0, 0, -HOOGTE_RC, 0),
+}

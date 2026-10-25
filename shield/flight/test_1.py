@@ -1,9 +1,9 @@
-"""Test 1: opstijgen, vooruit tot de muur, rondkijken naar het gele kruis, erheen vliegen en landen.
+"""Test 1: opstijgen, kleine stijging, 360-graden scan, naar het gele kruis vliegen en erop landen.
 
 Start vanuit de projectroot:
     python -m shield.flight.test_1
 
-Het live beeld opent eerst. SPATIE in het venster = opstijgen, q = direct landen.
+Het live beeld opent eerst. SPATIE in het venster = opstijgen, q = direct landen, f = beeld opslaan.
 """
 
 from shield.flight.drone import Vlucht
@@ -13,9 +13,9 @@ from shield.vision.markers import vind_geel
 
 def plan(vlucht: Vlucht) -> None:
     vlucht.opstijgen()
-    vlucht.vooruit()
-    vlucht.zoek_kruis(vind_geel)
-    vlucht.vlieg_en_land(vind_geel)
+    vlucht.kleine_stijging()
+    kruis = vlucht.zoek_kruis(vind_geel)
+    vlucht.vlieg_en_land(vind_geel, vast=kruis)
 
 
 if __name__ == "__main__":
