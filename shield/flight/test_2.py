@@ -8,14 +8,14 @@ Het live beeld opent eerst. SPATIE in het venster = opstijgen, q = direct landen
 
 from shield.flight.drone import Vlucht
 from shield.flight.runner import voer_uit
-from shield.vision.markers import vind_roze
+from shield.vision.kruis import vind_roze_kruis
 
 
 def plan(vlucht: Vlucht) -> None:
     vlucht.opstijgen()
     vlucht.kleine_stijging()
-    kruis = vlucht.zoek_kruis(vind_roze)
-    vlucht.vlieg_en_land(vind_roze, vast=kruis)
+    kruis = vlucht.zoek_kruis(vind_roze_kruis)
+    vlucht.vlieg_en_land(vind_roze_kruis, vast=kruis)
 
 
 if __name__ == "__main__":

@@ -334,3 +334,36 @@ def test_blauwpaarse_muur_is_geen_roze():
 
     muur = np.full((720, 960, 3), (90, 80, 140), dtype=np.uint8)
     assert vind_roze(muur) is None
+
+
+# --- Lijnen en gecombineerde detectie -------------------------------------------------
+
+
+def test_lijnendetector_vindt_roze_kruis_ook_bij_dunne_tape():
+    from shield.vision.lijnen import vind_kruis_lijnen
+
+    for dikte in (3, 6, 12):
+        kruis = vind_kruis_lijnen(frame_met_kruis(ROZE_RGB, dikte=dikte))
+        assert kruis is not None and abs(kruis.x) < 0.1 and abs(kruis.y) < 0.1, dikte
+
+
+def test_lijnendetector_vindt_geen_kruis_in_sticker_ring_of_leeg_beeld():
+    from shield.vision.lijnen import vind_kruis_lijnen
+
+    sticker, ring = leeg(), leeg()
+    sticker[300:420, 380:600] = ROZE_RGB
+    cv2.circle(ring, (480, 360), 40, ROZE_RGB, 6)
+    assert vind_kruis_lijnen(sticker) is None and vind_kruis_lijnen(ring) is None and vind_kruis_lijnen(leeg()) is None
+
+
+def test_gecombineerd_beide_methoden_geven_honderd_procent():
+    from shield.vision.kruis import vind_roze_kruis
+
+    kruis = vind_roze_kruis(frame_met_kruis(ROZE_RGB))
+    assert kruis is not None and kruis.score == 1.0
+
+
+def test_gecombineerd_negeert_geel_en_leeg():
+    from shield.vision.kruis import vind_roze_kruis
+
+    assert vind_roze_kruis(frame_met_kruis(GEEL_RGB)) is None and vind_roze_kruis(leeg()) is None

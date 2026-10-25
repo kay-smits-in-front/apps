@@ -7,12 +7,13 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from shield.vision.markers import SCORE_GEVONDEN, vind_roze
+from shield.vision.kruis import vind_roze_kruis
+from shield.vision.markers import SCORE_GEVONDEN
 from shield.vision.muur import muur_aandeel
 
 VENSTER = "SHIELD live (q = sluiten)"
 OPNAMEN = Path("shield/flight/opnames")
-KLEUREN = (("ROZE", vind_roze, (255, 0, 255)),)  # BGR
+KLEUREN = (("ROZE", vind_roze_kruis, (255, 0, 255)),)  # BGR
 
 
 def teken(frame_rgb: np.ndarray) -> np.ndarray:
