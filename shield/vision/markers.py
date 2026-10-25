@@ -25,6 +25,7 @@ MIN_OPPERVLAK = 40  # Pixels in het verkleinde beeld.
 MIN_STRAAL = 8  # Kleinste kruis (pixels van midden tot arm-uiteinde) dat we beoordelen.
 MIN_VORM = 0.08  # Kleinste verhouding tussen de korte en lange as van de vlek (1 = rond).
 MAX_KANDIDATEN = 6
+ARMEN_OK = (3, 4)  # Een arm kan in de schaduw of buiten beeld zijn: 3 van de 4 armen telt ook.
 SCORE_TONEN = 0.5  # Vanaf hier tekenen we de kandidaat in het live beeld.
 SCORE_GEVONDEN = 0.8  # Vanaf hier is het een kruis: minstens 5 van de 6 eisen kloppen.
 
@@ -32,8 +33,8 @@ SCORE_GEVONDEN = 0.8  # Vanaf hier is het een kruis: minstens 5 van de 6 eisen k
 # ligt onder warm licht rond hue 10-18.
 GEEL = ((22, 70, 70), (40, 255, 255))
 GROEN = ((35, 45, 40), (90, 255, 255))
-# Roze/magenta ligt op hue 145-175: boven de blauwpaarse muur (hue ~120-130) en onder rood (hue 0-10, 175+).
-ROZE = ((145, 70, 80), (175, 255, 255))
+# Gemeten op echte Tello-beelden: de roze tape is bleek (hue 162-173, saturatie 55-90, helderheid 130-210).
+ROZE = ((158, 45, 110), (177, 255, 255))
 
 _PUNTEN = 72
 _HOEK = np.linspace(0, 2 * np.pi, _PUNTEN, endpoint=False)
@@ -94,9 +95,9 @@ def kruis_score(vlek: np.ndarray, cx: float, cy: float, oppervlak: int) -> float
     armen = [aantal_armen(vlek, midden, vorm, f * straal) for f in (0.3, 0.5, 0.7)]
     vulling = oppervlak / (np.sqrt(np.linalg.det(covariantie)) * np.pi * straal**2)
     eisen = (
-        armen[0] == 4,
-        armen[1] == 4,
-        armen[2] == 4,
+        armen[0] in ARMEN_OK,
+        armen[1] in ARMEN_OK,
+        armen[2] in ARMEN_OK,
         bool(vlek[int(round(cy)) - 1:int(round(cy)) + 2, int(round(cx)) - 1:int(round(cx)) + 2].any()),
         0.04 <= vulling <= 0.45,
         assen[0] / assen[1] >= MIN_VORM,
