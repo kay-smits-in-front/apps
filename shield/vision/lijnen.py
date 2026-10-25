@@ -24,6 +24,7 @@ AFSTAND_TOL = 8  # Pixels tussen twee randen van één tape.
 MIDDEN_STRAAL = 14  # Armen moeten binnen deze afstand van het kruispunt beginnen of erdoorheen gaan.
 MIN_HOEK_TUSSEN_LIJNEN = np.radians(25)
 ARM_HOEK_TOL = np.radians(25)  # Armen binnen deze hoek van elkaar zijn dezelfde arm.
+CIRKEL_DELEN = (0.3, 0.45, 0.6, 0.75, 0.9)  # Aandelen van de blob-straal waarop de cirkel wordt gemeten.
 ARM_KANS = 50  # Zo roze moet een pixel op de arm minstens zijn.
 ARM_AANDEEL = 0.7  # Zo groot deel van het eerste stuk van elke arm moet roze zijn.
 MIN_PIXELS_KANS = 30  # Minder roze pixels dan dit: geen kruis, sla LSD over.
@@ -158,11 +159,30 @@ def keer_roze_op_cirkel(vlek: np.ndarray, punt: np.ndarray, straal: float) -> in
     return int(np.sum(rij & ~np.roll(rij, 1)))
 
 
-def past_bij_kruis(kans: np.ndarray, punt: np.ndarray, armen: list[tuple[np.ndarray, float]]) -> bool:
-    """Snijdt een cirkel rond het punt de roze vlek 3 of 4 keer? Een sticker (massief) of ring (gat) faalt."""
-    straal = 0.7 * min(lengte for _, lengte in armen)
+def blob_straal(vlek: np.ndarray, punt: np.ndarray) -> float:
+    """Afstand van `punt` tot de verste pixel van de roze vlek waar het punt in (of vlak naast) ligt. 0 = geen vlek."""
+    _, labels = cv2.connectedComponents(vlek.astype(np.uint8), connectivity=8)
+    x, y = int(round(punt[0])), int(round(punt[1]))
+    buurt = labels[max(y - 3, 0):y + 4, max(x - 3, 0):x + 4]
+    soorten = buurt[buurt > 0]
+    if soorten.size == 0:
+        return 0.0
+    ys, xs = np.nonzero(labels == np.bincount(soorten).argmax())
+    return float(np.hypot(xs - punt[0], ys - punt[1]).max())
+
+
+def past_bij_kruis(kans: np.ndarray, punt: np.ndarray) -> bool:
+    """Snijdt een cirkel rond het punt de roze vlek 3 of 4 keer? Een sticker (massief) of ring (gat) faalt.
+
+    Een dun kruis valt uiteen vlak bij het midden, een dik kruis pas dicht bij de uiteinden. Daarom meten we op
+    vijf stralen tussen 30 en 90% van de vlek en eisen we het op minstens twee ervan.
+    """
     vlek = cv2.dilate((kans > ARM_KANS).astype(np.uint8), np.ones((3, 3), np.uint8)).astype(bool)
-    return keer_roze_op_cirkel(vlek, punt, straal) in (*ARMEN_OK, -1)
+    straal = blob_straal(vlek, punt)
+    if straal < MIN_ARM:
+        return False
+    tellingen = [keer_roze_op_cirkel(vlek, punt, f * straal) for f in CIRKEL_DELEN]
+    return sum(n in (*ARMEN_OK, -1) for n in tellingen) >= 2
 
 
 def kruis_uit_lijnen(alle: list[Lijn], kans: np.ndarray) -> Marker | None:
@@ -173,7 +193,7 @@ def kruis_uit_lijnen(alle: list[Lijn], kans: np.ndarray) -> Marker | None:
         armen = unieke_armen([a for a in armen_bij(punt, alle) if arm_is_roze(kans, punt, a[0])])
         score = 1.0 if len(armen) >= 4 else 0.85  # 3 armen: een arm ligt in de schaduw of buiten beeld.
         opposite = any(a[0] @ b[0] < -0.5 for a in armen for b in armen)  # Minstens één lijn loopt door het punt.
-        if len(armen) >= 3 and opposite and (beste is None or score > beste.score) and past_bij_kruis(kans, punt, armen):
+        if len(armen) >= 3 and opposite and (beste is None or score > beste.score) and past_bij_kruis(kans, punt):
             beste = Marker(punt[0] / breedte * 2 - 1, punt[1] / hoogte * 2 - 1, 0.0, score)
     return beste
 

@@ -367,3 +367,13 @@ def test_gecombineerd_negeert_geel_en_leeg():
     from shield.vision.kruis import vind_roze_kruis
 
     assert vind_roze_kruis(frame_met_kruis(GEEL_RGB)) is None and vind_roze_kruis(leeg()) is None
+
+
+def test_gecombineerd_vindt_een_dik_kruis_op_een_witte_ondergrond():
+    from shield.vision.kruis import vind_roze_kruis
+
+    wit = np.full((720, 960, 3), 235, dtype=np.uint8)
+    kruis = frame_met_kruis(ROZE_RGB, lengte=55, dikte=22)
+    wit[kruis.sum(axis=2) > 0] = kruis[kruis.sum(axis=2) > 0]
+    gevonden = vind_roze_kruis(wit)
+    assert gevonden is not None and gevonden.score >= SCORE_GEVONDEN
