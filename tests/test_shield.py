@@ -275,18 +275,20 @@ def test_vliegt_naar_het_kruis_en_landt_niet_op_een_ander_punt():
     assert not vlucht.tello.geland
 
 
-def test_landt_na_het_naderen_als_kruis_gecentreerd_onderin_staat():
-    vlucht = Vlucht(NepTello(), Camera(frame_met_kruis(GEEL_RGB, cy=640)))
-    vlucht.vlieg_en_land(vind_geel, timeout_s=3, min_nader_s=0)
+def test_landt_na_het_naderen_als_kruis_gecentreerd_onderin_staat(monkeypatch):
+    monkeypatch.setattr(drone, "MIN_VOORUIT_S", 0.2)
+    monkeypatch.setattr(drone, "REMMEN_STRAAL", 0.05)  # Dit nagemaakte kruis is klein.
+    vlucht = Vlucht(NepTello(), Camera(frame_met_kruis(GEEL_RGB, cy=640, lengte=100)))
+    vlucht.vlieg_en_land(vind_geel, timeout_s=3)
     assert vlucht.tello.geland and vlucht.tello.stappen == []  # Geen move_*: alleen rc vooruit en landen.
     assert any(c[1] > 0 for c in vlucht.tello.commandos)
 
 
-def test_landt_niet_voordat_er_genaderd_is():
-    vlucht = Vlucht(NepTello(), Camera(frame_met_kruis(GEEL_RGB, cy=640)))
+def test_landt_niet_voordat_er_naar_het_kruis_gevlogen_is():
+    vlucht = Vlucht(NepTello(), Camera(frame_met_kruis(GEEL_RGB, cy=600, lengte=110)))
     with pytest.raises(Noodstop):
-        vlucht.vlieg_en_land(vind_geel, timeout_s=0.3, min_nader_s=5)
-    assert not vlucht.tello.geland
+        vlucht.vlieg_en_land(vind_geel, timeout_s=0.5)  # Korter dan MIN_VOORUIT_S: nog niet aangekomen.
+    assert not vlucht.tello.geland and any(c[1] > 0 for c in vlucht.tello.commandos)
 
 
 def test_een_boek_als_groen_kruis_laat_hem_niet_landen():
@@ -294,7 +296,7 @@ def test_een_boek_als_groen_kruis_laat_hem_niet_landen():
     boek[560:680, 380:600] = GROEN_RGB  # Onderin beeld, maar geen kruis.
     vlucht = Vlucht(NepTello(), Camera(boek))
     with pytest.raises(Noodstop):
-        vlucht.vlieg_en_land(vind_groen, timeout_s=1, min_nader_s=0)
+        vlucht.vlieg_en_land(vind_groen, timeout_s=1)
     assert not vlucht.tello.geland
 
 
@@ -400,19 +402,21 @@ def test_naar_marker_gaat_rustiger_vooruit_als_het_kruis_groot_wordt():
     assert 0 < dichtbij.fb < ver.fb
 
 
-def test_land_direct_voor_een_groot_kruis_op_een_muur():
+def test_land_direct_voor_een_groot_kruis_op_een_muur(monkeypatch):
+    monkeypatch.setattr(drone, "MIN_VOORUIT_S", 0.2)
     wit = np.full((720, 960, 3), 235, dtype=np.uint8)
     kruis = frame_met_kruis(ROZE_RGB, lengte=200, dikte=30)
     wit[kruis.sum(axis=2) > 0] = kruis[kruis.sum(axis=2) > 0]
     vlucht = Vlucht(NepTello(), Camera(wit))
     from shield.vision.kruis import vind_roze_kruis
 
-    vlucht.vlieg_en_land(vind_roze_kruis, timeout_s=3, min_nader_s=5)
+    vlucht.vlieg_en_land(vind_roze_kruis, timeout_s=3)
     vooruit = sum(1 for c in vlucht.tello.commandos if c[1] > 0)
     assert vlucht.tello.geland and vlucht.tello.commandos[-1] == (0, 0, 0, 0) and vooruit < 6  # Geen extra stuk vooruit.
 
 
-def test_kruis_verdwijnt_onderin_na_nadering_dan_nog_even_vooruit_en_landen():
+def test_kruis_verdwijnt_onderin_na_nadering_dan_nog_even_vooruit_en_landen(monkeypatch):
+    monkeypatch.setattr(drone, "MIN_VOORUIT_S", 0.05)
     class Verdwijnend:
         def __init__(self):
             self.n = 0
@@ -425,5 +429,5 @@ def test_kruis_verdwijnt_onderin_na_nadering_dan_nog_even_vooruit_en_landen():
     from shield.vision.kruis import vind_roze_kruis
 
     vlucht = Vlucht(NepTello(), Verdwijnend())
-    vlucht.vlieg_en_land(vind_roze_kruis, timeout_s=5, min_nader_s=0)
+    vlucht.vlieg_en_land(vind_roze_kruis, timeout_s=5)
     assert vlucht.tello.geland

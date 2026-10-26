@@ -13,7 +13,7 @@ from djitellopy import Tello, TelloException
 
 from shield.flight.sturing import (
     BOOG_S, BOOG_YAW, HERSTEL_RC, HERSTEL_S, HOOGTE_S, MAX_RONDES, RICHTING, ROND_RC, SLOT_SPRONG, SPOOR_SPRONG,
-    CENTREER_X, OVER_HET_KRUIS_S, START_OMHOOG_S, STIL, ZIJ_S, ZOEK_VOORUIT_S, Rc, corrigeer, horizontale_opties,
+    CENTREER_X, OVER_HET_KRUIS_S, REMMEN_STRAAL, START_OMHOOG_S, STIL, ZIJ_S, ZOEK_VOORUIT_S, Rc, corrigeer, horizontale_opties,
     is_dichtbij, is_erboven_verdwenen, naar_marker, verticale_opties,
 )
 from shield.vision.markers import SCORE_GEVONDEN, Marker
@@ -27,6 +27,7 @@ LANDEN_Y = 0.7  # Kruis zo laag in beeld (en gecentreerd): we zijn er bijna.
 LAATSTE_CM = 20  # Laatste stuk vooruit met het kruis onder de camera uit beeld.
 MIN_NADER_S = 1.5  # Nooit landen voor we minstens zo lang naar het kruis zijn gevlogen.
 BEVESTIG_FRAMES = 5
+MIN_VOORUIT_S = 1.5  # Zo lang moet de drone naar het kruis toe gevlogen hebben voor hij 'aangekomen' mag zijn.
 AANKOMST_FRAMES = 3  # Zo veel beelden achter elkaar moet het kruis 'dichtbij' zijn.  # Een kruis telt pas als hij zo vaak achter elkaar is gezien.
 KWIJT_FRAMES = 8  # Zo lang kwijt = onder de camera verdwenen of echt weg.
 STABILISEER_S = 1.0
@@ -289,7 +290,7 @@ class Vlucht:
         return rc
 
     def vlieg_en_land(
-        self, zoeker: Zoeker, vast: Marker | None = None, timeout_s: float = 40, min_nader_s: float = MIN_NADER_S
+        self, zoeker: Zoeker, vast: Marker | None = None, timeout_s: float = 40
     ) -> None:
         """Vergrendel op het kruis, vlieg ernaartoe, en land bij aankomst.
 
@@ -303,21 +304,24 @@ class Vlucht:
         """
         stap("vergrendeld, naar het kruis")
         self.nieuw_nulpunt(None)
-        start = time.monotonic()
-        slot, laatste = Spoor(SLOT_SPRONG), vast
-        slot.laatste = vast
-        rc, laag, dichtbij, kwijt, herstel_start = STIL, 0, 0, 0, None
+        start = vorig = time.monotonic()
+        slot, laatste = Spoor(SLOT_SPRONG), vast  # Nog geen slot: na het draaien klopt de plek van `vast` niet meer.
+        rc, laag, dichtbij, kwijt, herstel_start, vooruit_s = STIL, 0, 0, 0, None, 0.0
         reden: str | None = None
         while time.monotonic() - start < timeout_s and reden is None:
-            marker = zoeker(self.camera.frame)
-            genoeg_tijd = time.monotonic() - start >= min_nader_s
+            frame = self.camera.frame
+            marker = zoeker(frame)
+            nu = time.monotonic()
+            vooruit_s += (nu - vorig) * (rc.fb > 0)
+            vorig = nu
+            onderweg = vooruit_s >= MIN_VOORUIT_S  # Aankomst telt pas nadat we echt naar het kruis gevlogen hebben.
             if marker is not None and marker.score >= SCORE_GEVONDEN and slot.past(marker):
                 kwijt, laatste, herstel_start, slot.laatste = 0, marker, None, marker
                 dichtbij = dichtbij + 1 if is_dichtbij(marker) else 0
-                laag = laag + 1 if abs(marker.x) < CENTREER_X and marker.y > LANDEN_Y else 0
-                if dichtbij >= AANKOMST_FRAMES:
+                laag = laag + 1 if abs(marker.x) < CENTREER_X and marker.y > LANDEN_Y and marker.straal >= REMMEN_STRAAL else 0
+                if onderweg and dichtbij >= AANKOMST_FRAMES:
                     reden = "voor"
-                elif laag >= BEVESTIG_FRAMES and genoeg_tijd:
+                elif onderweg and laag >= BEVESTIG_FRAMES:
                     reden = "erboven"
                 else:
                     rc = self.begrens_dalen(naar_marker(marker))
@@ -326,18 +330,21 @@ class Vlucht:
                 kwijt, laag, dichtbij = kwijt + 1, 0, 0
                 if kwijt < KWIJT_FRAMES:
                     self.stuur(rc)  # Kort kwijt: koers houden.
-                elif is_erboven_verdwenen(laatste):
+                elif onderweg and is_erboven_verdwenen(laatste):
                     reden = "erboven"
                 elif herstel_start is None or time.monotonic() - herstel_start < HERSTEL_S:
                     herstel_start = herstel_start or time.monotonic()
                     slot.laatste = None  # Ontgrendel: elk goed kruis mag weer.
                     richting = -1 if laatste is not None and laatste.x < 0 else 1
                     self.stuur(Rc(0, 0, 0, richting * HERSTEL_RC))  # Draai naar waar het kruis het laatst was.
+                    rc = STIL
                 else:
                     raise Noodstop("Kruis kwijt.")
             time.sleep(LOOP_TIJD_S)
         if reden is None:
             raise Noodstop("Niet op tijd bij het kruis.")
+        if laatste is not None:
+            stap(f"kruis straal {laatste.straal:.2f}, y {laatste.y:.2f}, {vooruit_s:.1f} s vooruit gevlogen")
         self.land_bij_kruis(reden)
 
     def land_bij_kruis(self, reden: str) -> None:
