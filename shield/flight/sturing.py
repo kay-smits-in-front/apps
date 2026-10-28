@@ -30,7 +30,7 @@ KIJK_FRAMES = 4  # Zo veel verse beelden per stap.
 KIJK_TUSSEN_S = 0.1
 
 # Zoeken: per standpunt een 360-scan, dan naar de meest open richting en een ander hoogteniveau.
-ZOEK_VOORUIT_S = 4.0  # Vooruit naar het volgende standpunt (stopt eerder bij een muur).
+RC_M_PER_S = 0.0175  # Aanname: rc-waarde 20 = 0,35 m/s. Meet dit na (vlieg 4 s vooruit, meet de afstand) en pas aan.
 MIN_ZOEK_CM = 40  # Niet lager zoeken dan dit (gemeten hoogte).
 MAX_ZOEK_CM = 160  # Niet hoger zoeken dan dit.
 MAX_NETTO_S = 2.0  # Als de hoogtemeting 0 geeft: nooit meer dan zoveel seconden netto stijgen of dalen.

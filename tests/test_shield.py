@@ -4,7 +4,7 @@ import pytest
 
 import shield.flight.drone as drone
 from shield.flight.drone import Hoek, Noodstop, Spoor, Vlucht
-from shield.flight.zoeken import Dekking, Geheugen, kies_richting, kies_stap_hoogte
+from shield.flight.kaart import KOLOMMEN, MIN_RESTKANS, N, Kaart, peiling_en_afstand, rechte_stukken
 from shield.flight.sturing import (
     DOEL_Y, MAX_NETTO_S, MAX_ZOEK_CM, MIN_ZOEK_CM, RICHTING, STIL, Rc, corrigeer, is_dichtbij, is_erboven_verdwenen,
     naar_marker, verticale_opties,
@@ -205,53 +205,90 @@ def snel_kijken(monkeypatch):
     monkeypatch.setattr(drone, "KIJK_TUSSEN_S", 0.01)
 
 
-def dekking_met(open_van: float, open_tot: float, muur_elders: float = 0.95) -> Dekking:
-    """Dekking waarin alleen de richtingen tussen open_van en open_tot open zijn."""
-    dekking = Dekking()
-    for graden in range(0, 360, 10):
-        muur = 0.1 if open_van <= graden < open_tot else muur_elders
-        dekking.registreer(graden + 5, muur, 0.0)
-    return dekking
+def vrij(kolommen: float = 0.2) -> np.ndarray:
+    return np.full(KOLOMMEN, kolommen)
 
 
-def test_dekking_telt_beelden_per_richting_en_welk_deel_gezien_is():
-    dekking = Dekking()
-    dekking.registreer(5, 0.9, 0.2)
-    dekking.registreer(8, 0.5, 0.6)
-    dekking.registreer(365, 0.1, 0.0)  # Draaide een klein stukje te ver: hoort weer bij de eerste sector.
-    assert dekking.aantal[0] == 3 and dekking.beste_score[0] == 0.6
-    assert dekking.gezien() == 1 / 36
+def test_kijken_zonder_kruis_verlaagt_de_kans_voor_de_drone_maar_niet_erachter():
+    kaart = Kaart()
+    voor = kaart.kansen[0].sum()
+    kaart.bekijk(0, 0.0, vrij())  # Kijkt langs de +x-as.
+    voorin, achterin = kaart.cel(1.5, 0), kaart.cel(-1.5, 0)
+    assert kaart.kansen[0].sum() < voor
+    assert kaart.kansen[0][voorin] < 0.4 * kaart.kansen[0][achterin]
+    assert kaart.kansen[1].sum() == pytest.approx(kaart.kansen[-1].sum())  # Andere niveaus onaangeroerd.
 
 
-def test_kies_richting_gaat_naar_de_open_kant():
-    richting = kies_richting(dekking_met(100, 170), terug=[])
-    assert 100 <= richting <= 170
+def test_een_vlakke_strook_beperkt_hoe_ver_we_kijken():
+    open_zicht, muur_zicht = Kaart(), Kaart()
+    open_zicht.bekijk(0, 0.0, vrij(0.2))
+    muur_zicht.bekijk(0, 0.0, vrij(0.99))
+    ver = open_zicht.cel(2.5, 0)
+    assert open_zicht.kansen[0][ver] < muur_zicht.kansen[0][ver]
 
 
-def test_kies_richting_vermijdt_de_kant_waar_we_vandaan_kwamen():
-    dekking = Dekking()
-    for graden in range(0, 360, 10):  # Open rondom, maar rechts achter ons (180) is het meest open.
-        dekking.registreer(graden + 5, 0.2 if 150 <= graden < 210 else 0.4, 0.0)
-    assert 150 <= kies_richting(dekking, terug=[]) <= 210
-    assert not 130 <= kies_richting(dekking, terug=[180.0]) <= 230
+def test_na_een_volledige_ronde_is_er_veel_minder_kans_over():
+    kaart = Kaart()
+    for richting in range(0, 360, 40):
+        kaart.bekijk(0, float(richting), vrij())
+    assert kaart.kansen[0].sum() < 0.5 * kaart.kansen[1].sum()
 
 
-def test_kies_richting_geeft_none_als_alles_muur_is():
-    assert kies_richting(dekking_met(0, 0, muur_elders=0.98), terug=[]) is None
+def test_kaart_kiest_een_ander_standpunt_met_meer_nog_niet_geziene_kans():
+    kaart = Kaart()
+    for richting in range(0, 360, 40):
+        kaart.bekijk(0, float(richting), vrij())
+    besluit = kaart.kies(0, {0})
+    assert besluit is not None and besluit.doel != kaart.cel(0, 0)
+    assert besluit.route[0] == kaart.cel(0, 0) and besluit.route[-1] == besluit.doel
 
 
-def test_geheugen_schuift_de_richting_terug_mee_met_een_draai():
-    geheugen = Geheugen()
-    geheugen.verplaatst()
-    geheugen.gedraaid(90)
-    assert geheugen.terug == [90.0]
+def test_kaart_wisselt_van_niveau_als_dat_meer_oplevert():
+    kaart = Kaart()
+    for richting in range(0, 360, 40):
+        kaart.bekijk(0, float(richting), vrij())  # Niveau 0 is bekeken; -1 en 1 niet.
+    assert kaart.kies(0, {-1, 0, 1}).niveau != 0
 
 
-def test_hoogteniveaus_eerst_omlaag_dan_omhoog_en_nooit_dubbel():
-    assert kies_stap_hoogte(0, {0}, ["omhoog", "omlaag"]) == "omlaag"
-    assert kies_stap_hoogte(-1, {0, -1}, ["omhoog", "omlaag"]) == "omhoog" or kies_stap_hoogte(-1, {0, -1}, ["omhoog", "omlaag"]) == "omlaag"
-    assert kies_stap_hoogte(0, {0, -1, 1}, ["omhoog", "omlaag"]) is None
-    assert kies_stap_hoogte(0, {0}, ["omhoog"]) == "omhoog"  # Omlaag mag niet (te laag): omhoog.
+def test_kaart_zegt_afgezocht_als_de_kans_op_is():
+    kaart = Kaart()
+    for n in kaart.kansen:
+        kaart.kansen[n][:] = MIN_RESTKANS / (3 * N * N) * 0.5
+    assert kaart.kies(0, {0}) is None
+
+
+def test_astar_loopt_om_een_muur_heen_en_vindt_niets_in_een_gesloten_vak():
+    kaart = Kaart()
+    kaart.wand[:, N // 2] = True  # Hele muur van boven naar onder.
+    assert kaart.route((0, 0), (0, N - 1)) == []
+    kaart.wand[3, N // 2] = False  # Een opening.
+    route = kaart.route((0, 0), (0, N - 1))
+    assert route and (3, N // 2) in route
+
+
+def test_astar_route_is_recht_zonder_obstakels_en_rechte_stukken_geven_knikpunten():
+    kaart = Kaart()
+    route = kaart.route((2, 2), (2, 8))
+    assert route == [(2, c) for c in range(2, 9)] and rechte_stukken(route) == [(2, 8)]
+    assert rechte_stukken([(0, 0), (0, 1), (0, 2), (1, 2), (2, 2)]) == [(0, 2), (2, 2)]
+
+
+def test_muur_markeren_blokkeert_cellen_en_haalt_de_kans_weg():
+    kaart = Kaart()
+    kaart.markeer_wand(0.0)  # Muur 0,8 m vóór de drone langs de +x-as.
+    cel = kaart.cel(0.8, 0)
+    assert kaart.wand[cel] and all(k[cel] == 0 for k in kaart.kansen.values())
+
+
+def test_verplaatsen_volgt_de_koers():
+    kaart = Kaart()
+    kaart.verplaats(1.0, 90.0)
+    assert kaart.x == pytest.approx(0.0, abs=1e-9) and kaart.y == pytest.approx(1.0)
+
+
+def test_peiling_en_afstand():
+    assert peiling_en_afstand((0, 0), (0, 2)) == pytest.approx((90.0, 2.0))
+    assert peiling_en_afstand((1, 1), (0, 1))[0] == pytest.approx(180.0)
 
 
 def test_hoogtegrenzen_voorkomen_te_laag_en_te_hoog():
@@ -261,16 +298,17 @@ def test_hoogtegrenzen_voorkomen_te_laag_en_te_hoog():
     assert verticale_opties(0, MAX_NETTO_S) == ["omlaag"]  # Hoogte onbekend: netto stijgen is begrensd.
 
 
-def test_scan_draait_een_hele_ronde_en_vult_de_dekking():
-    vlucht = Vlucht(NepTello(draait=True), Camera(leeg()))
-    dekking = Dekking()
-    assert vlucht.scan(vind_roze, dekking, [], stap_graden=40) is None
-    assert dekking.gezien() > 0.9
+def test_scan_draait_een_hele_ronde_en_verlaagt_de_kans_overal():
+    ruis = np.repeat(np.random.default_rng(2).integers(0, 255, (720, 960, 1), dtype=np.uint8), 3, axis=2)  # Grijs, niets vlaks.
+    vlucht = Vlucht(NepTello(draait=True), Camera(ruis))
+    assert vlucht.scan(vind_roze, [], stap_graden=40) is None
+    assert vlucht.kaart.kansen[0].sum() < 0.5 * vlucht.kaart.kansen[1].sum()
+    assert vlucht.koers == pytest.approx(0.0, abs=15) or vlucht.koers > 345  # Weer in de beginrichting.
 
 
 def test_scan_stopt_direct_bij_een_mogelijk_kruis_en_bevestigt_het():
     vlucht = Vlucht(NepTello(draait=True), Camera(frame_met_kruis(ROZE_RGB)))
-    kruis = vlucht.scan(vind_roze, Dekking(), [])
+    kruis = vlucht.scan(vind_roze, [])
     assert kruis is not None and kruis.score >= SCORE_GEVONDEN
     assert sum(1 for c in vlucht.tello.commandos if c[3] > 0) < 15  # Niet eerst nog een hele ronde.
 
@@ -279,7 +317,7 @@ def test_scan_negeert_een_boek_en_draait_door():
     boek = leeg()
     boek[300:420, 380:600] = GROEN_RGB
     vlucht = Vlucht(NepTello(draait=True), Camera(boek))
-    assert vlucht.scan(vind_groen, Dekking(), []) is None
+    assert vlucht.scan(vind_groen, []) is None
 
 
 def test_scan_negeert_richtingen_van_een_eerder_vals_alarm():
@@ -287,7 +325,7 @@ def test_scan_negeert_richtingen_van_een_eerder_vals_alarm():
     halfkruis[:, 480:] = 0  # Halve kruis: score ligt tussen 'lijkt erop' en 'bevestigd'.
     vlucht = Vlucht(NepTello(draait=True), Camera(halfkruis))
     genegeerd = list(range(0, 360, 10))  # Alles genegeerd: nergens meer stoppen.
-    assert vlucht.scan(vind_roze, Dekking(), genegeerd) is None
+    assert vlucht.scan(vind_roze, genegeerd) is None
 
 
 def test_draai_naar_kiest_de_kortste_kant():
@@ -297,28 +335,44 @@ def test_draai_naar_kiest_de_kortste_kant():
     assert any(c[3] < 0 for c in links.commandos) and all(c[3] >= 0 for c in rechts.commandos)
 
 
-def test_zoek_kruis_vliegt_naar_de_open_kant_en_wisselt_van_hoogte(monkeypatch):
+def test_zoek_kruis_vliegt_naar_het_door_de_kaart_gekozen_standpunt(monkeypatch):
     vlucht = Vlucht(NepTello(draait=True), Camera(leeg()))
     acties = []
+    monkeypatch.setattr(vlucht, "mogelijke_niveaus", lambda: {0})
+    monkeypatch.setattr(vlucht, "scan", lambda zoeker, genegeerd: [vlucht.kaart.bekijk(0, float(r), vrij()) for r in range(0, 360, 40)] and None)
     monkeypatch.setattr(vlucht, "draai_naar", lambda graden: acties.append(("draai", graden)))
     monkeypatch.setattr(vlucht, "vooruit", lambda max_s, zoeker=None: acties.append(("vooruit", max_s)))
     monkeypatch.setattr(vlucht, "beweeg", lambda naam, s: acties.append((naam, s)))
-    monkeypatch.setattr(
-        vlucht, "scan", lambda zoeker, dekking, genegeerd: [dekking.registreer(g + 5, 0.1 if 60 <= g < 120 else 0.95, 0) for g in range(0, 360, 10)] and None
-    )
     with pytest.raises(Noodstop):
         vlucht.zoek_kruis(vind_roze, max_rondes=2)
-    assert acties[0][0] == "draai" and 60 <= acties[0][1] <= 120
-    assert [a[0] for a in acties[1:]] == ["vooruit", "omlaag"]
+    assert acties and acties[0][0] in ("draai", "vooruit")
+    assert any(a[0] == "vooruit" and a[1] > 0 for a in acties)
 
 
 def test_zoek_kruis_stopt_als_de_ruimte_afgezocht_is(monkeypatch):
     vlucht = Vlucht(NepTello(draait=True), Camera(leeg()))
-    monkeypatch.setattr(vlucht, "scan", lambda zoeker, dekking, genegeerd: dekking_met(0, 0, 0.99) and None)
-    monkeypatch.setattr(vlucht.tello, "get_height", lambda: MIN_ZOEK_CM)  # Omlaag mag niet.
-    vlucht.netto_hoogte_s = MAX_NETTO_S  # Omhoog ook niet.
+    monkeypatch.setattr(vlucht, "scan", lambda zoeker, genegeerd: None)
+    for kans in vlucht.kaart.kansen.values():
+        kans[:] = 0.0
     with pytest.raises(Noodstop, match="afgezocht"):
         vlucht.zoek_kruis(vind_roze, max_rondes=5)
+
+
+def test_vooruit_markeert_een_muur_en_telt_de_afstand_mee():
+    muur = Vlucht(NepTello(), Camera(np.full((720, 960, 3), 200, dtype=np.uint8)))
+    muur.vooruit(2.0)
+    assert muur.kaart.wand.any()
+    open_ruimte = Vlucht(NepTello(), Camera(np.random.default_rng(1).integers(0, 255, (720, 960, 3), dtype=np.uint8)))
+    open_ruimte.vooruit(0.5)
+    assert open_ruimte.kaart.x > 0.05 and not open_ruimte.kaart.wand.any()
+
+
+def test_koers_telt_mee_met_draaien():
+    vlucht = Vlucht(NepTello(draait=True), camera=None)
+    vlucht.draai(90)
+    assert 70 < vlucht.koers < 110
+    vlucht.draai_naar(300)  # Kortste kant: 60 graden terug.
+    assert 5 < vlucht.koers < 70
 
 
 def test_zoek_kruis_beweegt_niet_als_kruis_al_zichtbaar():
@@ -499,15 +553,6 @@ def test_kruis_verdwijnt_onderin_na_nadering_dan_nog_even_vooruit_en_landen(monk
     vlucht = Vlucht(NepTello(), Verdwijnend())
     vlucht.vlieg_en_land(vind_roze_kruis, timeout_s=5)
     assert vlucht.tello.geland
-
-
-def test_een_beeld_dekt_het_hele_beeldveld_en_het_kruis_zijn_eigen_richting():
-    dekking = Dekking()
-    kolommen = np.array([0.9, 0.9, 0.9, 0.1, 0.9, 0.9, 0.9])
-    dekking.registreer_beeld(90, kolommen, marker_x=0.6, score=0.7)
-    gezien = np.nonzero(dekking.aantal)[0]
-    assert gezien.min() * 10 <= 90 - 25 and (gezien.max() + 1) * 10 >= 90 + 25  # Ruim ±25 graden rond de kijkrichting.
-    assert dekking.beste_score.max() == 0.7 and dekking.sector(90) != int(np.argmax(dekking.beste_score))  # Kruis rechts van midden.
 
 
 def test_muur_kolommen_zien_waar_de_rand_zit():
