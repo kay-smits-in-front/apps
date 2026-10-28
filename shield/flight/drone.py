@@ -2,21 +2,21 @@
 
 import logging
 import math
-import random
 import threading
 import time
 from contextlib import contextmanager
-from typing import Callable, Iterator, NamedTuple
+from typing import Callable, Iterator
 
 import numpy as np
 from djitellopy import Tello, TelloException
 
 from shield.flight.sturing import (
-    BOOG_S, BOOG_YAW, HERSTEL_RC, HERSTEL_S, HOOGTE_S, MAX_RONDES, RICHTING, ROND_RC, SLOT_SPRONG, SPOOR_SPRONG,
-    CENTREER_X, OVER_HET_KRUIS_S, REMMEN_STRAAL, START_OMHOOG_S, STIL, ZIJ_S, ZOEK_VOORUIT_S, Rc, corrigeer, horizontale_opties,
-    is_dichtbij, is_erboven_verdwenen, naar_marker, verticale_opties,
+    CENTREER_X, GENEGEERD_GRADEN, HERSTEL_RC, HERSTEL_S, HOOGTE_S, MAX_RONDES, OVER_HET_KRUIS_S, PRIORITEIT_FRAMES,
+    REMMEN_STRAAL, RICHTING, ROND_RC, SLOT_SPRONG, SPOOR_SPRONG, START_OMHOOG_S, STIL, VERIFIEER_S, ZOEK_VOORUIT_S, Rc,
+    corrigeer, is_dichtbij, is_erboven_verdwenen, naar_marker, verticale_opties,
 )
-from shield.vision.markers import SCORE_GEVONDEN, Marker
+from shield.flight.zoeken import Dekking, Geheugen, kies_richting, kies_stap_hoogte
+from shield.vision.markers import SCORE_GEVONDEN, SCORE_TONEN, Marker
 from shield.vision.muur import MUUR_STOP, muur_aandeel
 
 MIN_BATTERIJ = 40
@@ -58,18 +58,12 @@ class Hoek:
         return abs(self.totaal)
 
 
-class Waarneming(NamedTuple):
-    """Een kruis dat tijdens de scan recht voor de drone stond, en in welke richting dat was."""
-
-    graden: float  # Hoeveel graden na de start van de scan (0..360).
-    marker: Marker
-
-
 class Spoor:
     """Houdt bij of opeenvolgende detecties bij hetzelfde kruis horen: een kruis springt niet door het beeld."""
 
-    def __init__(self, sprong: float) -> None:
+    def __init__(self, sprong: float, min_score: float = SCORE_GEVONDEN) -> None:
         self.sprong = sprong
+        self.min_score = min_score
         self.laatste: Marker | None = None
         self.lengte = 0
 
@@ -80,8 +74,8 @@ class Spoor:
         )
 
     def volg(self, marker: Marker | None) -> int:
-        """Verwerk een beeld; geef hoeveel beelden achter elkaar hetzelfde goede kruis is gezien."""
-        if marker is None or marker.score < SCORE_GEVONDEN:
+        """Verwerk een beeld; geef hoeveel beelden achter elkaar hetzelfde kruis (score >= min_score) is gezien."""
+        if marker is None or marker.score < self.min_score:
             self.laatste, self.lengte = None, 0
             return 0
         self.lengte = self.lengte + 1 if self.past(marker) else 1
@@ -127,7 +121,6 @@ class Vlucht:
         self.positie = Positie(tello)
         self.daal_s = DAAL_BUDGET_S
         self.netto_hoogte_s = 0.0  # Seconden omhoog min omlaag tijdens het zoeken.
-        self.rng = random.Random()
         self.stop = threading.Event()  # Gezet door q: direct landen.
         self.max_afwijking: float | None = None  # None = bewust bewegen, geen afstandslimiet.
 
@@ -167,12 +160,12 @@ class Vlucht:
         stap("stabiliseren")
         self.houd(STIL, STABILISEER_S)
 
-    def vooruit(self, max_s: float = VOORUIT_MAX_S, yaw: int = 0, zoeker: Zoeker | None = None) -> Marker | None:
-        """Vlieg vooruit (met yaw > 0 of < 0 in een boog) tot de muur het beeld vult of max_s om is.
+    def vooruit(self, max_s: float = VOORUIT_MAX_S, zoeker: Zoeker | None = None) -> Marker | None:
+        """Vlieg vooruit tot de muur het beeld vult of max_s om is.
 
         Met een zoeker kijkt de drone onderweg mee: een kruis dat BEVESTIG_FRAMES vast in beeld staat stopt de vlucht.
         """
-        stap("vooruit tot muur" if yaw == 0 else "boog")
+        stap("vooruit tot muur")
         self.nieuw_nulpunt(None)
         start, muur, spoor, gezien = time.monotonic(), 0, Spoor(SPOOR_SPRONG), None
         while time.monotonic() - start < max_s:
@@ -183,7 +176,7 @@ class Vlucht:
                 break
             if muur >= BEVESTIG_FRAMES:
                 break
-            self.stuur(Rc(0, VOORUIT_RC, 0, yaw))
+            self.stuur(Rc(0, VOORUIT_RC, 0, 0))
             time.sleep(LOOP_TIJD_S)
         self.houd(STIL, 1.0, max_afwijking=None)
         return gezien
@@ -209,7 +202,7 @@ class Vlucht:
             self.draai(360 - graden, richting=-1)
 
     def beweeg(self, naam: str, seconden: float) -> None:
-        """Een korte, begrensde beweging (rechts, links, omhoog, omlaag) met rc, daarna stilhangen."""
+        """Een korte, begrensde hoogteverandering (omhoog of omlaag) met rc, daarna stilhangen."""
         stap(f"{naam} {seconden:.1f} s")
         self.netto_hoogte_s += seconden * ((naam == "omhoog") - (naam == "omlaag"))
         self.houd(RICHTING[naam], seconden, max_afwijking=None)
@@ -226,58 +219,111 @@ class Vlucht:
             time.sleep(LOOP_TIJD_S)
         return all(metingen)
 
-    def scan360(self, zoeker: Zoeker, snelheid: int | None = None) -> Waarneming | None:
-        """Draai een hele ronde en kijk naar elk beeld. Geef het kruis dat het langst vast in beeld stond.
+    def scan(self, zoeker: Zoeker, dekking: Dekking, genegeerd: list[float], snelheid: int | None = None) -> Marker | None:
+        """Draai een ronde en noteer per richting wat er te zien is. Stop direct bij een mogelijk kruis.
 
-        De kijkrichting is het moment waarop dat kruis het dichtst bij het midden van het beeld stond.
+        Een 'mogelijk kruis' (score >= SCORE_TONEN, PRIORITEIT_FRAMES vast) stopt de draai meteen; `verifieer` kijkt dan
+        of het er echt een is. Was het vals alarm, dan wordt die richting genegeerd en draait de scan door.
+        Geeft het bevestigde kruis, of None na een volledige ronde.
         """
         snelheid = snelheid or ROND_RC
         self.nieuw_nulpunt(None)
         hoek = Hoek(self.tello.get_yaw())
         einde = time.monotonic() + 2 * 360 / snelheid + 5
-        spoor, beste, beste_lengte, kandidaat = Spoor(SPOOR_SPRONG), None, 0, None
+        spoor = Spoor(SPOOR_SPRONG, SCORE_TONEN)
         while hoek.bijwerken(self.tello.get_yaw()) < 360 and time.monotonic() < einde:
-            marker = zoeker(self.camera.frame)
-            lengte = spoor.volg(marker)
-            if lengte == 0:
-                kandidaat = None
-            elif lengte == 1:
-                kandidaat = Waarneming(abs(hoek.totaal), marker)
-            elif kandidaat is not None and abs(marker.x) < abs(kandidaat.marker.x):
-                kandidaat = Waarneming(abs(hoek.totaal), marker)
-            if lengte >= BEVESTIG_FRAMES and lengte > beste_lengte:
-                beste, beste_lengte = kandidaat, lengte
+            frame = self.camera.frame
+            graden = abs(hoek.totaal)
+            marker = zoeker(frame)
+            dekking.registreer(graden, muur_aandeel(frame), marker.score if marker is not None else 0.0)
+            negeren = any(abs((graden - g + 180) % 360 - 180) < GENEGEERD_GRADEN for g in genegeerd)
+            if spoor.volg(None if negeren else marker) >= PRIORITEIT_FRAMES:
+                stap(f"mogelijk kruis op {graden:.0f} graden, score {marker.score:.0%}: stop met draaien")
+                self.stuur(STIL)
+                if (bevestigd := self.verifieer(zoeker)) is not None:
+                    return bevestigd
+                genegeerd.append(graden)
+                spoor = Spoor(SPOOR_SPRONG, SCORE_TONEN)
+                continue
             self.stuur(Rc(0, 0, 0, snelheid))
             time.sleep(LOOP_TIJD_S)
         self.stuur(STIL)
-        if beste is not None:
-            stap(f"kruis gezien ({beste_lengte} beelden), score {beste.marker.score:.0%}, op {beste.graden:.0f} graden")
-        return beste
+        return None
+
+    def verifieer(self, zoeker: Zoeker) -> Marker | None:
+        """Vlieg rustig naar een mogelijk kruis toe tot het bevestigd is (score >= SCORE_GEVONDEN) of vals alarm blijkt.
+
+        Alleen draaien en vooruit (nooit dalen). Het kruis blijft kwijt of de score stijgt niet: vals alarm.
+        """
+        stap("controleren: dichterbij kijken")
+        self.nieuw_nulpunt(None)
+        spoor, kwijt, einde = Spoor(SLOT_SPRONG, SCORE_TONEN), 0, time.monotonic() + VERIFIEER_S
+        while time.monotonic() < einde:
+            marker = zoeker(self.camera.frame)
+            lengte = spoor.volg(marker)
+            if lengte == 0:
+                kwijt += 1
+                if kwijt >= KWIJT_FRAMES:
+                    break
+                self.stuur(STIL)
+            else:
+                kwijt = 0
+                if marker.score >= SCORE_GEVONDEN and lengte >= BEVESTIG_FRAMES:
+                    self.stuur(STIL)
+                    return marker
+                self.stuur(naar_marker(marker)._replace(ud=0))
+            time.sleep(LOOP_TIJD_S)
+        self.houd(STIL, 0.5, max_afwijking=None)
+        stap("vals alarm, verder zoeken")
+        return None
 
     def zoek_kruis(self, zoeker: Zoeker, max_rondes: int = MAX_RONDES) -> Marker:
-        """Scan eerst de hele ruimte. Gevonden: draai ernaartoe. Niets: ergens anders heen en opnieuw."""
+        """Scan het standpunt. Niets: ga naar de meest open richting en een ander hoogteniveau en scan opnieuw.
+
+        Vliegt nergens heen waar een scan al muur zag. Is er geen open richting en geen nieuw hoogteniveau meer,
+        dan is deze ruimte afgezocht.
+        """
+        geheugen, genegeerd = Geheugen(), []
         for ronde in range(max_rondes):
-            stap(f"scan {ronde + 1} van {max_rondes}")
-            if (waarneming := self.scan360(zoeker)) is not None:
-                self.draai_naar(waarneming.graden)
-                return waarneming.marker
-            if ronde < max_rondes - 1 and (onderweg := self.nieuwe_plek(zoeker)) is not None:
-                return onderweg  # Tijdens het verplaatsen al gezien: meteen vergrendelen.
+            stap(f"standpunt {ronde + 1} van {max_rondes}, niveau {geheugen.niveau}")
+            dekking = Dekking()
+            if (marker := self.scan(zoeker, dekking, genegeerd)) is not None:
+                return marker
+            geheugen.leg_vast(dekking)
+            stap(f"niets gezien; {dekking.gezien():.0%} van de richtingen bekeken")
+            if ronde == max_rondes - 1:
+                break
+            volgende = self.volgend_standpunt(zoeker, dekking, geheugen)
+            if volgende is False:
+                raise Noodstop("Ruimte afgezocht: geen kruis, geen open richting of nieuw hoogteniveau meer.")
+            if volgende is not True:
+                return volgende  # Onderweg al een kruis gezien.
+            genegeerd = []
         raise Noodstop("Geen kruis gevonden.")
 
-    def nieuwe_plek(self, zoeker: Zoeker | None = None) -> Marker | None:
-        """Willekeurige horizontale stap (vooruit, opzij of boog) plus een stap omhoog of omlaag binnen de grenzen."""
-        keuze = self.rng.choice(horizontale_opties(self.muur_voor()))
-        gezien = None
-        if keuze == "vooruit":
-            gezien = self.vooruit(ZOEK_VOORUIT_S, zoeker=zoeker)
-        elif keuze.startswith("boog"):
-            gezien = self.vooruit(BOOG_S, yaw=BOOG_YAW if keuze == "boog_rechts" else -BOOG_YAW, zoeker=zoeker)
-        else:
-            self.beweeg(keuze, ZIJ_S)
-        if gezien is None and (hoogte := verticale_opties(self.tello.get_height(), self.netto_hoogte_s)):
-            self.beweeg(self.rng.choice(hoogte), HOOGTE_S)
-        return gezien
+    def volgend_standpunt(self, zoeker: Zoeker, dekking: Dekking, geheugen: Geheugen) -> Marker | bool:
+        """Draai naar de meest open richting en vlieg vooruit; pas het hoogteniveau aan.
+
+        Geeft True na een verplaatsing, False als er nergens meer heen te gaan is, of een Marker als er onderweg
+        een kruis in beeld kwam.
+        """
+        richting = kies_richting(dekking, geheugen.terug)
+        stap_hoogte = kies_stap_hoogte(
+            geheugen.niveau, geheugen.bezocht, verticale_opties(self.tello.get_height(), self.netto_hoogte_s)
+        )
+        if richting is None and stap_hoogte is None:
+            return False
+        if richting is not None:
+            stap(f"naar de meest open richting: {richting:.0f} graden")
+            self.draai_naar(richting)
+            geheugen.gedraaid(richting)
+            if (gezien := self.vooruit(ZOEK_VOORUIT_S, zoeker=zoeker)) is not None:
+                return gezien
+            geheugen.verplaatst()
+        if stap_hoogte is not None:
+            self.beweeg(stap_hoogte, HOOGTE_S)
+            geheugen.veranderd_van_niveau(stap_hoogte)
+        return True
 
     def begrens_dalen(self, rc: Rc) -> Rc:
         """Daal in totaal maximaal DAAL_BUDGET_S en nooit onder MIN_HOOGTE_CM (als de meting klopt)."""

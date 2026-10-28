@@ -4,8 +4,10 @@ import pytest
 
 import shield.flight.drone as drone
 from shield.flight.drone import Hoek, Noodstop, Spoor, Vlucht
+from shield.flight.zoeken import Dekking, Geheugen, kies_richting, kies_stap_hoogte
 from shield.flight.sturing import (
-    DOEL_Y, is_dichtbij, is_erboven_verdwenen, MAX_NETTO_S, MAX_ZOEK_CM, MIN_ZOEK_CM, RICHTING, horizontale_opties, verticale_opties, STIL, Rc, corrigeer, naar_marker,
+    DOEL_Y, MAX_NETTO_S, MAX_ZOEK_CM, MIN_ZOEK_CM, RICHTING, STIL, Rc, corrigeer, is_dichtbij, is_erboven_verdwenen,
+    naar_marker, verticale_opties,
 )
 from shield.vision.markers import SCORE_GEVONDEN, Marker, vind_geel, vind_groen, vind_roze
 
@@ -106,9 +108,8 @@ def test_demping_alleen_op_assen_zonder_commando():
     assert corrigeer(Rc(0, 0, 0, 0), vx=0, vy=2).lr != 0
 
 
-def test_richtingen_zijn_links_rechts_omhoog_omlaag():
-    assert set(RICHTING) == {"links", "rechts", "omhoog", "omlaag"}
-    assert RICHTING["rechts"].lr > 0 > RICHTING["links"].lr
+def test_alleen_nog_hoogtebewegingen_als_vaste_stap():
+    assert set(RICHTING) == {"omhoog", "omlaag"}
     assert RICHTING["omhoog"].ud > 0 > RICHTING["omlaag"].ud
 
 
@@ -195,54 +196,56 @@ def test_vooruit_stopt_bij_muur_en_gaat_door_in_open_ruimte():
     assert vooruit(bij_muur) <= 5 < vooruit(in_open)
 
 
-# --- Scannen en zoeken --------------------------------------------------------------
+# --- Zoeken: dekking, richting kiezen, scan ---------------------------------------------
 
 
-def test_scan_vindt_het_kruis_en_onthoudt_de_richting():
-    vlucht = Vlucht(NepTello(draait=True), Camera(frame_met_kruis(GEEL_RGB)))
-    waarneming = vlucht.scan360(vind_geel, snelheid=100)
-    assert waarneming is not None and waarneming.marker.score >= 0.8
-    assert vlucht.tello.commandos[-1] == (0, 0, 0, 0)
+def dekking_met(open_van: float, open_tot: float, muur_elders: float = 0.95) -> Dekking:
+    """Dekking waarin alleen de richtingen tussen open_van en open_tot open zijn."""
+    dekking = Dekking()
+    for graden in range(0, 360, 10):
+        muur = 0.1 if open_van <= graden < open_tot else muur_elders
+        dekking.registreer(graden + 5, muur, 0.0)
+    return dekking
 
 
-def test_scan_draait_een_hele_ronde_zonder_kruis():
-    vlucht = Vlucht(NepTello(draait=True), Camera(leeg()))
-    assert vlucht.scan360(vind_geel, snelheid=100) is None
-    assert sum(c[3] for c in vlucht.tello.commandos if c[3] > 0) * 0.2 >= 340
+def test_dekking_telt_beelden_per_richting_en_welk_deel_gezien_is():
+    dekking = Dekking()
+    dekking.registreer(5, 0.9, 0.2)
+    dekking.registreer(8, 0.5, 0.6)
+    dekking.registreer(365, 0.1, 0.0)  # Draaide een klein stukje te ver: hoort weer bij de eerste sector.
+    assert dekking.aantal[0] == 3 and dekking.beste_score[0] == 0.6
+    assert dekking.gezien() == 1 / 36
 
 
-def test_scan_negeert_een_boek():
-    boek = leeg()
-    boek[300:420, 380:600] = GROEN_RGB
-    assert Vlucht(NepTello(draait=True), Camera(boek)).scan360(vind_groen, snelheid=100) is None
+def test_kies_richting_gaat_naar_de_open_kant():
+    richting = kies_richting(dekking_met(100, 170), terug=[])
+    assert 100 <= richting <= 170
 
 
-def test_draai_naar_kiest_de_kortste_kant():
-    links, rechts = NepTello(draait=True), NepTello(draait=True)
-    Vlucht(links, camera=None).draai_naar(300)
-    Vlucht(rechts, camera=None).draai_naar(60)
-    assert any(c[3] < 0 for c in links.commandos) and all(c[3] >= 0 for c in rechts.commandos)
+def test_kies_richting_vermijdt_de_kant_waar_we_vandaan_kwamen():
+    dekking = Dekking()
+    for graden in range(0, 360, 10):  # Open rondom, maar rechts achter ons (180) is het meest open.
+        dekking.registreer(graden + 5, 0.2 if 150 <= graden < 210 else 0.4, 0.0)
+    assert 150 <= kies_richting(dekking, terug=[]) <= 210
+    assert not 130 <= kies_richting(dekking, terug=[180.0]) <= 230
 
 
-def test_zoek_kruis_beweegt_pas_na_een_lege_scan(monkeypatch):
-    monkeypatch.setattr(drone, "ROND_RC", 100)
-    vlucht = Vlucht(NepTello(draait=True), Camera(leeg()))
-    zijwaarts = []
-    monkeypatch.setattr(vlucht, "nieuwe_plek", lambda zoeker: zijwaarts.append(1))
-    with pytest.raises(Noodstop):
-        vlucht.zoek_kruis(vind_geel, max_rondes=3)
-    assert len(zijwaarts) == 2  # Na elke lege scan behalve de laatste.
+def test_kies_richting_geeft_none_als_alles_muur_is():
+    assert kies_richting(dekking_met(0, 0, muur_elders=0.98), terug=[]) is None
 
 
-def test_zoek_kruis_beweegt_niet_als_kruis_al_zichtbaar():
-    vlucht = Vlucht(NepTello(draait=True), Camera(frame_met_kruis(GEEL_RGB)))
-    assert vlucht.zoek_kruis(vind_geel) is not None
-    assert vlucht.tello.stappen == []
+def test_geheugen_schuift_de_richting_terug_mee_met_een_draai():
+    geheugen = Geheugen()
+    geheugen.verplaatst()
+    geheugen.gedraaid(90)
+    assert geheugen.terug == [90.0]
 
 
-def test_bij_een_muur_alleen_opzij():
-    assert set(horizontale_opties(muur=True)) == {"links", "rechts"}
-    assert {"vooruit", "boog_links", "boog_rechts"} <= set(horizontale_opties(muur=False))
+def test_hoogteniveaus_eerst_omlaag_dan_omhoog_en_nooit_dubbel():
+    assert kies_stap_hoogte(0, {0}, ["omhoog", "omlaag"]) == "omlaag"
+    assert kies_stap_hoogte(-1, {0, -1}, ["omhoog", "omlaag"]) == "omhoog" or kies_stap_hoogte(-1, {0, -1}, ["omhoog", "omlaag"]) == "omlaag"
+    assert kies_stap_hoogte(0, {0, -1, 1}, ["omhoog", "omlaag"]) is None
+    assert kies_stap_hoogte(0, {0}, ["omhoog"]) == "omhoog"  # Omlaag mag niet (te laag): omhoog.
 
 
 def test_hoogtegrenzen_voorkomen_te_laag_en_te_hoog():
@@ -252,16 +255,76 @@ def test_hoogtegrenzen_voorkomen_te_laag_en_te_hoog():
     assert verticale_opties(0, MAX_NETTO_S) == ["omlaag"]  # Hoogte onbekend: netto stijgen is begrensd.
 
 
-def test_nieuwe_plek_gaat_zijwaarts_bij_muur():
-    vlucht = Vlucht(NepTello(), Camera(np.full((720, 960, 3), 200, dtype=np.uint8)))
-    vlucht.nieuwe_plek()
-    assert not any(c[1] > 0 for c in vlucht.tello.commandos)
+def test_scan_draait_een_hele_ronde_en_vult_de_dekking():
+    vlucht = Vlucht(NepTello(draait=True), Camera(leeg()))
+    dekking = Dekking()
+    assert vlucht.scan(vind_roze, dekking, [], snelheid=40) is None  # Nep-draai: 8 graden per beeld.
+    assert dekking.gezien() > 0.9
 
 
-def test_boog_stopt_en_geeft_het_kruis_dat_onderweg_in_beeld_komt():
+def test_scan_stopt_direct_bij_een_mogelijk_kruis_en_bevestigt_het():
+    vlucht = Vlucht(NepTello(draait=True), Camera(frame_met_kruis(ROZE_RGB)))
+    kruis = vlucht.scan(vind_roze, Dekking(), [], snelheid=100)
+    assert kruis is not None and kruis.score >= SCORE_GEVONDEN
+    assert sum(1 for c in vlucht.tello.commandos if c[3] > 0) < 15  # Niet eerst nog een hele ronde.
+
+
+def test_scan_negeert_een_boek_en_draait_door():
+    boek = leeg()
+    boek[300:420, 380:600] = GROEN_RGB
+    vlucht = Vlucht(NepTello(draait=True), Camera(boek))
+    assert vlucht.scan(vind_groen, Dekking(), [], snelheid=100) is None
+
+
+def test_scan_negeert_richtingen_van_een_eerder_vals_alarm():
+    halfkruis = frame_met_kruis(ROZE_RGB)
+    halfkruis[:, 480:] = 0  # Halve kruis: score ligt tussen 'lijkt erop' en 'bevestigd'.
+    vlucht = Vlucht(NepTello(draait=True), Camera(halfkruis))
+    genegeerd = list(range(0, 360, 10))  # Alles genegeerd: nergens meer stoppen.
+    assert vlucht.scan(vind_roze, Dekking(), genegeerd, snelheid=100) is None
+
+
+def test_draai_naar_kiest_de_kortste_kant():
+    links, rechts = NepTello(draait=True), NepTello(draait=True)
+    Vlucht(links, camera=None).draai_naar(300)
+    Vlucht(rechts, camera=None).draai_naar(60)
+    assert any(c[3] < 0 for c in links.commandos) and all(c[3] >= 0 for c in rechts.commandos)
+
+
+def test_zoek_kruis_vliegt_naar_de_open_kant_en_wisselt_van_hoogte(monkeypatch):
+    monkeypatch.setattr(drone, "ROND_RC", 100)
+    vlucht = Vlucht(NepTello(draait=True), Camera(leeg()))
+    acties = []
+    monkeypatch.setattr(vlucht, "draai_naar", lambda graden: acties.append(("draai", graden)))
+    monkeypatch.setattr(vlucht, "vooruit", lambda max_s, zoeker=None: acties.append(("vooruit", max_s)))
+    monkeypatch.setattr(vlucht, "beweeg", lambda naam, s: acties.append((naam, s)))
+    monkeypatch.setattr(
+        vlucht, "scan", lambda zoeker, dekking, genegeerd, snelheid=None: [dekking.registreer(g + 5, 0.1 if 60 <= g < 120 else 0.95, 0) for g in range(0, 360, 10)] and None
+    )
+    with pytest.raises(Noodstop):
+        vlucht.zoek_kruis(vind_roze, max_rondes=2)
+    assert acties[0][0] == "draai" and 60 <= acties[0][1] <= 120
+    assert [a[0] for a in acties[1:]] == ["vooruit", "omlaag"]
+
+
+def test_zoek_kruis_stopt_als_de_ruimte_afgezocht_is(monkeypatch):
+    vlucht = Vlucht(NepTello(draait=True), Camera(leeg()))
+    monkeypatch.setattr(vlucht, "scan", lambda zoeker, dekking, genegeerd, snelheid=None: dekking_met(0, 0, 0.99) and None)
+    monkeypatch.setattr(vlucht.tello, "get_height", lambda: MIN_ZOEK_CM)  # Omlaag mag niet.
+    vlucht.netto_hoogte_s = MAX_NETTO_S  # Omhoog ook niet.
+    with pytest.raises(Noodstop, match="afgezocht"):
+        vlucht.zoek_kruis(vind_roze, max_rondes=5)
+
+
+def test_zoek_kruis_beweegt_niet_als_kruis_al_zichtbaar():
+    vlucht = Vlucht(NepTello(draait=True), Camera(frame_met_kruis(ROZE_RGB)))
+    assert vlucht.zoek_kruis(vind_roze) is not None
+    assert vlucht.tello.stappen == []
+
+
+def test_vooruit_geeft_een_kruis_dat_onderweg_in_beeld_komt():
     vlucht = Vlucht(NepTello(), Camera(frame_met_kruis(ROZE_RGB)))
-    kruis = vlucht.vooruit(5.0, yaw=25, zoeker=vind_roze)
-    assert kruis is not None and any(c[3] == 25 for c in vlucht.tello.commandos)
+    assert vlucht.vooruit(5.0, zoeker=vind_roze) is not None
 
 
 # --- Naderen en landen ---------------------------------------------------------------
