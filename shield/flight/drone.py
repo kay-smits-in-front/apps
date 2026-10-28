@@ -27,7 +27,7 @@ LANDEN_Y = 0.7  # Kruis zo laag in beeld (en gecentreerd): we zijn er bijna.
 LAATSTE_CM = 20  # Laatste stuk vooruit met het kruis onder de camera uit beeld.
 MIN_NADER_S = 1.5  # Nooit landen voor we minstens zo lang naar het kruis zijn gevlogen.
 BEVESTIG_FRAMES = 5
-MIN_VOORUIT_S = 1.5  # Zo lang moet de drone naar het kruis toe gevlogen hebben voor hij 'aangekomen' mag zijn.
+MIN_VOORUIT_S = 5.0  # Zo lang moet de drone naar het kruis toe gevlogen hebben voor hij 'aangekomen' mag zijn.
 AANKOMST_FRAMES = 3  # Zo veel beelden achter elkaar moet het kruis 'dichtbij' zijn.  # Een kruis telt pas als hij zo vaak achter elkaar is gezien.
 KWIJT_FRAMES = 8  # Zo lang kwijt = onder de camera verdwenen of echt weg.
 STABILISEER_S = 1.0
