@@ -14,7 +14,8 @@ VENSTER_SECTOREN = 3  # Bij het kiezen van een richting kijken we ±3 sectoren (
 MIN_OPEN = 0.10  # Minder 'open' dan dit (aandeel niet-vlak beeld): geen weg om doorheen te vliegen.
 TERUG_STRAF_GRADEN = 50  # Richtingen binnen zoveel graden van waar we vandaan kwamen krijgen een straf.
 TERUG_STRAF = 0.5
-MIN_DEKKING = 0.9  # Aandeel sectoren dat gezien moet zijn om een standpunt 'rondgekeken' te noemen.
+CAMERA_HOEK = 65.0  # Horizontaal beeldveld van de Tello in graden (geschat).
+KOLOMMEN = 7  # Het beeld wordt in zoveel stroken verdeeld, elk met een eigen richting.
 
 
 class Dekking:
@@ -35,6 +36,18 @@ class Dekking:
         self.aantal[i] += 1
         self.muur_som[i] += muur
         self.beste_score[i] = max(self.beste_score[i], score)
+
+    def registreer_beeld(self, graden: float, muur_kolommen: np.ndarray, marker_x: float | None, score: float) -> None:
+        """Verwerk één beeld: elke strook hoort bij een richting rond `graden`, het kruis bij zijn eigen strook.
+
+        graden is de kijkrichting (midden van het beeld) in de draairichting van rc-yaw; een strook rechts van het
+        midden ligt dus verder in die richting.
+        """
+        n = len(muur_kolommen)
+        hoeken = (np.arange(n) + 0.5) / n * CAMERA_HOEK - CAMERA_HOEK / 2
+        kruis_strook = -1 if marker_x is None else min(int((marker_x + 1) / 2 * n), n - 1)
+        for k, (hoek, muur) in enumerate(zip(hoeken, muur_kolommen)):
+            self.registreer(graden + hoek, float(muur), score if k == kruis_strook else 0.0)
 
     def gezien(self) -> float:
         """Aandeel van de sectoren (0..1) waar minstens één beeld van is."""
@@ -99,3 +112,8 @@ class Geheugen:
     def veranderd_van_niveau(self, stap: str) -> None:
         self.niveau += 1 if stap == "omhoog" else -1
         self.bezocht.add(self.niveau)
+
+
+def profiel(dekking: Dekking) -> str:
+    """Eén cijfer (0 = muur, 9 = open) per sector van 10 graden, om in de log te kunnen zien wat de drone zag."""
+    return "".join(str(int(round(w * 9))) for w in np.clip(dekking.open_per_sector(), 0, 1))

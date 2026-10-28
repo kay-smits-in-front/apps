@@ -12,12 +12,12 @@ from djitellopy import Tello, TelloException
 
 from shield.flight.sturing import (
     CENTREER_X, GENEGEERD_GRADEN, HERSTEL_RC, HERSTEL_S, HOOGTE_S, MAX_RONDES, OVER_HET_KRUIS_S, PRIORITEIT_FRAMES,
-    REMMEN_STRAAL, RICHTING, ROND_RC, SLOT_SPRONG, SPOOR_SPRONG, START_OMHOOG_S, STIL, VERIFIEER_S, ZOEK_VOORUIT_S, Rc,
+    REMMEN_STRAAL, RICHTING, KIJK_FRAMES, KIJK_S, KIJK_TUSSEN_S, MIN_STAP_RC, SCAN_STAP_GRADEN, SLOT_SPRONG, STAP_RC, SPOOR_SPRONG, START_OMHOOG_S, STIL, VERIFIEER_S, ZOEK_VOORUIT_S, Rc,
     corrigeer, is_dichtbij, is_erboven_verdwenen, naar_marker, verticale_opties,
 )
-from shield.flight.zoeken import Dekking, Geheugen, kies_richting, kies_stap_hoogte
+from shield.flight.zoeken import KOLOMMEN, Dekking, Geheugen, kies_richting, kies_stap_hoogte, profiel
 from shield.vision.markers import SCORE_GEVONDEN, SCORE_TONEN, Marker
-from shield.vision.muur import MUUR_STOP, muur_aandeel
+from shield.vision.muur import MUUR_STOP, muur_aandeel, muur_kolommen
 
 MIN_BATTERIJ = 40
 MIN_HOOGTE_CM = 25  # Niet verder dalen onder deze hoogte (als de hoogtemeting klopt).
@@ -181,17 +181,21 @@ class Vlucht:
         self.houd(STIL, 1.0, max_afwijking=None)
         return gezien
 
+    def draai_tot(self, hoek: Hoek, doel_graden: float, richting: int = 1, marge: float = 4, timeout_s: float = 10) -> None:
+        """Draai via rc-yaw tot `hoek` (de gemeten yaw sinds de start) `doel_graden` heeft bereikt, en blijf dan stil."""
+        einde = time.monotonic() + timeout_s
+        while (gedraaid := hoek.bijwerken(self.tello.get_yaw())) < doel_graden - marge:
+            if time.monotonic() > einde:
+                raise Noodstop("Draaien duurt te lang.")
+            self.stuur(Rc(0, 0, 0, richting * int(np.clip(doel_graden - gedraaid, MIN_STAP_RC, STAP_RC))))
+            time.sleep(0.05)
+        self.stuur(STIL)
+
     def draai(self, graden: float, richting: int = 1, marge: float = 8, timeout_s: float = 15) -> None:
         """Draai via rc-yaw op de gemeten yaw. 'cw' faalt zonder geldige vision-positie."""
         stap(f"draaien {richting * graden:.0f}")
         self.nieuw_nulpunt(None)  # Alleen helling bewaken; de snelheid draait mee met de drone.
-        hoek = Hoek(self.tello.get_yaw())
-        einde = time.monotonic() + timeout_s
-        while (gedraaid := hoek.bijwerken(self.tello.get_yaw())) < graden - marge:
-            if time.monotonic() > einde:
-                raise Noodstop("Draaien duurt te lang.")
-            self.stuur(Rc(0, 0, 0, richting * int(np.clip(graden - gedraaid, 25, 60))))
-            time.sleep(0.05)
+        self.draai_tot(Hoek(self.tello.get_yaw()), graden, richting, marge, timeout_s)
         self.houd(STIL, 1.0)
 
     def draai_naar(self, graden: float) -> None:
@@ -219,35 +223,43 @@ class Vlucht:
             time.sleep(LOOP_TIJD_S)
         return all(metingen)
 
-    def scan(self, zoeker: Zoeker, dekking: Dekking, genegeerd: list[float], snelheid: int | None = None) -> Marker | None:
-        """Draai een ronde en noteer per richting wat er te zien is. Stop direct bij een mogelijk kruis.
+    def kijk(self, zoeker: Zoeker, dekking: Dekking, graden: float, spoor: Spoor, genegeerd: list[float]) -> bool:
+        """Sta stil, neem KIJK_FRAMES verse beelden en noteer ze. True als er een mogelijk kruis is (PRIORITEIT_FRAMES vast)."""
+        self.houd(STIL, KIJK_S, max_afwijking=None)
+        negeren = any(abs((graden - g + 180) % 360 - 180) < GENEGEERD_GRADEN for g in genegeerd)
+        for _ in range(KIJK_FRAMES):
+            frame = self.camera.frame
+            marker = zoeker(frame)
+            dekking.registreer_beeld(
+                graden, muur_kolommen(frame, KOLOMMEN), None if marker is None else marker.x, 0.0 if marker is None else marker.score
+            )
+            if spoor.volg(None if negeren else marker) >= PRIORITEIT_FRAMES:
+                return True
+            self.stuur(STIL)
+            time.sleep(KIJK_TUSSEN_S)
+        return False
 
-        Een 'mogelijk kruis' (score >= SCORE_TONEN, PRIORITEIT_FRAMES vast) stopt de draai meteen; `verifieer` kijkt dan
-        of het er echt een is. Was het vals alarm, dan wordt die richting genegeerd en draait de scan door.
-        Geeft het bevestigde kruis, of None na een volledige ronde.
+    def scan(self, zoeker: Zoeker, dekking: Dekking, genegeerd: list[float], stap_graden: float = SCAN_STAP_GRADEN) -> Marker | None:
+        """Draai een ronde in stappen: draai, hang stil, kijk. Stop direct bij een mogelijk kruis.
+
+        Stilstaan bij het kijken voorkomt bewegingsonscherpte en een achterlopend beeld. Een 'mogelijk kruis'
+        (score >= SCORE_TONEN, PRIORITEIT_FRAMES vast) stopt de scan meteen; `verifieer` kijkt of het er echt een
+        is. Was het vals alarm, dan wordt die richting genegeerd en gaat de scan door. Geeft het bevestigde kruis,
+        of None na een volledige ronde (de drone kijkt dan weer de richting op waarin hij begon).
         """
-        snelheid = snelheid or ROND_RC
         self.nieuw_nulpunt(None)
         hoek = Hoek(self.tello.get_yaw())
-        einde = time.monotonic() + 2 * 360 / snelheid + 5
         spoor = Spoor(SPOOR_SPRONG, SCORE_TONEN)
-        while hoek.bijwerken(self.tello.get_yaw()) < 360 and time.monotonic() < einde:
-            frame = self.camera.frame
-            graden = abs(hoek.totaal)
-            marker = zoeker(frame)
-            dekking.registreer(graden, muur_aandeel(frame), marker.score if marker is not None else 0.0)
-            negeren = any(abs((graden - g + 180) % 360 - 180) < GENEGEERD_GRADEN for g in genegeerd)
-            if spoor.volg(None if negeren else marker) >= PRIORITEIT_FRAMES:
-                stap(f"mogelijk kruis op {graden:.0f} graden, score {marker.score:.0%}: stop met draaien")
-                self.stuur(STIL)
+        for doel in np.arange(0, 360 - 1e-6, stap_graden):
+            self.draai_tot(hoek, float(doel))
+            if self.kijk(zoeker, dekking, abs(hoek.totaal), spoor, genegeerd):
+                stap(f"mogelijk kruis op {abs(hoek.totaal):.0f} graden: stop met draaien")
                 if (bevestigd := self.verifieer(zoeker)) is not None:
                     return bevestigd
-                genegeerd.append(graden)
+                genegeerd.append(abs(hoek.totaal))
                 spoor = Spoor(SPOOR_SPRONG, SCORE_TONEN)
-                continue
-            self.stuur(Rc(0, 0, 0, snelheid))
-            time.sleep(LOOP_TIJD_S)
-        self.stuur(STIL)
+        self.draai_tot(hoek, 360.0)  # Weer in de beginrichting kijken: de hoeken van de dekking kloppen dan.
+        stap(f"scan klaar, geschatte afwijking {self.positie.afwijking():.0f} cm")
         return None
 
     def verifieer(self, zoeker: Zoeker) -> Marker | None:
@@ -308,6 +320,7 @@ class Vlucht:
         een kruis in beeld kwam.
         """
         richting = kies_richting(dekking, geheugen.terug)
+        stap(f"open ruimte per 10 graden (0-9): {profiel(dekking)}")
         stap_hoogte = kies_stap_hoogte(
             geheugen.niveau, geheugen.bezocht, verticale_opties(self.tello.get_height(), self.netto_hoogte_s)
         )

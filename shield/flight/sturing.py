@@ -19,8 +19,15 @@ VOORUIT_LANGZAAM = 8
 EINDE_ONDERIN_Y = 0.55  # Kruis onderin beeld verdwenen na deze hoogte: we zijn erboven.
 MIN_STRAAL_BIJ_VERLIES = 0.04  # ...maar alleen als het kruis eerst groot genoeg in beeld was.
 OVER_HET_KRUIS_S = 0.8  # Daarna zo lang nog vooruit voor we landen.
-ROND_RC = 30  # Draaisnelheid bij rondkijken (ongeveer graden per seconde).
 MAX_RC = 100
+
+# Scannen: stap-voor-stap draaien met stilhangen en kijken (stilstaand beeld is scherp en niet verouderd).
+SCAN_STAP_GRADEN = 40  # De camera ziet ~65 graden breed: 40 graden per stap geeft ruim overlap.
+STAP_RC = 40  # Maximale draaisnelheid per stap (rc-yaw).
+MIN_STAP_RC = 20
+KIJK_S = 0.6  # Zo lang stilhangen na een draai voor we kijken: het beeld moet tot rust komen.
+KIJK_FRAMES = 4  # Zo veel verse beelden per stap.
+KIJK_TUSSEN_S = 0.1
 
 # Zoeken: per standpunt een 360-scan, dan naar de meest open richting en een ander hoogteniveau.
 ZOEK_VOORUIT_S = 4.0  # Vooruit naar het volgende standpunt (stopt eerder bij een muur).
