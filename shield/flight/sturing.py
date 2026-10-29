@@ -31,12 +31,16 @@ KIJK_TUSSEN_S = 0.1
 
 # Zoeken: per standpunt een 360-scan, dan naar de meest open richting en een ander hoogteniveau.
 RC_M_PER_S = 0.0175  # Aanname: rc-waarde 20 = 0,35 m/s. Meet dit na (vlieg 4 s vooruit, meet de afstand) en pas aan.
-MIN_ZOEK_CM = 40  # Niet lager zoeken dan dit (gemeten hoogte).
-MAX_ZOEK_CM = 160  # Niet hoger zoeken dan dit.
-MAX_NETTO_S = 2.0  # Als de hoogtemeting 0 geeft: nooit meer dan zoveel seconden netto stijgen of dalen.
-START_OMHOOG_S = 0.8  # Kleine stijging voor de eerste scan.
+# Hoogteniveaus (cm boven de vloer) waarop we zoeken: laag (vloer, bed), midden (bureau, tafel), hoog.
+NIVEAU_CM = (45, 100, 150)
+NIVEAU_PRIOR = (0.25, 0.5, 0.25)  # Waar het kruis waarschijnlijk zit: de meeste kans op bureau-hoogte.
+START_NIVEAU = 1
 HOOGTE_RC = 30
-HOOGTE_S = 1.0  # Eén stap omhoog of omlaag tussen twee scans.
+HOOGTE_CM_PER_S = 30.0  # Aanname: rc 30 omhoog/omlaag = 30 cm/s, alleen gebruikt als de hoogtemeting 0 geeft.
+HOOGTE_MARGE_CM = 8
+HOOGTE_MAX_S = 5.0  # Maximaal zo lang omhoog of omlaag voor een niveau (de sensor stopt hem eerder).
+TAKEOFF_CM = 80  # Hoogte direct na opstijgen, als de sensor nog niets meldt.
+MIN_VLOER_CM = 30  # Nooit lager dan dit.
 MAX_RONDES = 6  # Maximaal aantal standpunten voor we opgeven.
 PRIORITEIT_FRAMES = 3  # Zo veel beelden achter elkaar 'lijkt op een kruis' (score >= SCORE_TONEN): stop met draaien.
 VERIFIEER_S = 5.0  # Zo lang rustig naar een mogelijk kruis toe vliegen om te zien of het er echt een is.
@@ -100,16 +104,3 @@ def corrigeer(rc: Rc, vx: float, vy: float) -> Rc:
     """Demp alleen de assen waarop we niets bewust commanderen."""
     d = demping(vx, vy)
     return Rc(rc.lr or d.lr, rc.fb or d.fb, rc.ud, rc.yaw)
-
-
-RICHTING = {
-    "omhoog": Rc(0, 0, HOOGTE_RC, 0),
-    "omlaag": Rc(0, 0, -HOOGTE_RC, 0),
-}
-
-
-def verticale_opties(hoogte_cm: float, netto_s: float) -> list[str]:
-    """Waarheen kan de drone verticaal? Hoogte 0 = onbekend: dan telt het netto stijgen/dalen."""
-    omhoog = (hoogte_cm <= 0 or hoogte_cm < MAX_ZOEK_CM) and netto_s < MAX_NETTO_S
-    omlaag = (hoogte_cm <= 0 or hoogte_cm > MIN_ZOEK_CM) and netto_s > -MAX_NETTO_S
-    return (["omhoog"] if omhoog else []) + (["omlaag"] if omlaag else [])

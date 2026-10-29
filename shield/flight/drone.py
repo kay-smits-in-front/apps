@@ -11,17 +11,17 @@ import numpy as np
 from djitellopy import Tello, TelloException
 
 from shield.flight.sturing import (
-    CENTREER_X, GENEGEERD_GRADEN, HERSTEL_RC, HERSTEL_S, HOOGTE_S, KIJK_FRAMES, KIJK_S, KIJK_TUSSEN_S, MAX_RONDES,
-    MIN_STAP_RC, OVER_HET_KRUIS_S, PRIORITEIT_FRAMES, RC_M_PER_S, REMMEN_STRAAL, RICHTING, SCAN_STAP_GRADEN,
-    SLOT_SPRONG, SPOOR_SPRONG, STAP_RC, START_OMHOOG_S, STIL, VERIFIEER_S, Rc, corrigeer, is_dichtbij,
-    is_erboven_verdwenen, naar_marker, verticale_opties,
+    CENTREER_X, GENEGEERD_GRADEN, HERSTEL_RC, HERSTEL_S, HOOGTE_CM_PER_S, HOOGTE_MARGE_CM, HOOGTE_MAX_S, HOOGTE_RC,
+    KIJK_FRAMES, KIJK_S, KIJK_TUSSEN_S, MAX_RONDES, MIN_STAP_RC, MIN_VLOER_CM, NIVEAU_CM, NIVEAU_PRIOR,
+    OVER_HET_KRUIS_S, PRIORITEIT_FRAMES, RC_M_PER_S, REMMEN_STRAAL, SCAN_STAP_GRADEN, SLOT_SPRONG, SPOOR_SPRONG,
+    STAP_RC, START_NIVEAU, STIL, TAKEOFF_CM, VERIFIEER_S, Rc, corrigeer, is_dichtbij, is_erboven_verdwenen,
+    naar_marker,
 )
 from shield.flight.kaart import KOLOMMEN, Kaart, peiling_en_afstand, rechte_stukken
 from shield.vision.markers import SCORE_GEVONDEN, SCORE_TONEN, Marker
 from shield.vision.muur import MUUR_STOP, muur_aandeel, muur_kolommen
 
 MIN_BATTERIJ = 40
-MIN_HOOGTE_CM = 25  # Niet verder dalen onder deze hoogte (als de hoogtemeting klopt).
 DAAL_BUDGET_S = 4.0  # Totaal aantal seconden dat bij het naderen gedaald mag worden.
 LOOP_TIJD_S = 0.03
 LANDEN_Y = 0.7  # Kruis zo laag in beeld (en gecentreerd): we zijn er bijna.
@@ -30,7 +30,8 @@ MIN_NADER_S = 1.5  # Nooit landen voor we minstens zo lang naar het kruis zijn g
 BEVESTIG_FRAMES = 5
 MIN_VOORUIT_S = 5.0  # Zo lang moet de drone naar het kruis toe gevlogen hebben voor hij 'aangekomen' mag zijn.
 AANKOMST_FRAMES = 3  # Zo veel beelden achter elkaar moet het kruis 'dichtbij' zijn.  # Een kruis telt pas als hij zo vaak achter elkaar is gezien.
-KWIJT_FRAMES = 8  # Zo lang kwijt = onder de camera verdwenen of echt weg.
+KWIJT_S = 0.8  # Zo lang geen kruis gezien = onder de camera verdwenen of echt weg (tijd, want een beeld kost ~50 ms).
+STIL_ZOEK_S = 1.5  # Eerst zo lang stilhangen en kijken voor we ronddraaien om een kwijtgeraakt kruis te zoeken.
 STABILISEER_S = 1.0
 VOORUIT_RC = 20  # Was 40 x 2.5 s: te ver en te hard.
 VOORUIT_MAX_S = 2.0  # Maximale duur; stopt eerder zodra de muur het beeld vult.
@@ -121,10 +122,10 @@ class Vlucht:
         self.camera = camera
         self.positie = Positie(tello)
         self.daal_s = DAAL_BUDGET_S
-        self.netto_hoogte_s = 0.0  # Seconden omhoog min omlaag tijdens het zoeken.
-        self.kaart = Kaart()
+        self.hoogte_schatting = float(TAKEOFF_CM)  # Alleen gebruikt als de hoogtemeting 0 geeft.
+        self.kaart = Kaart(NIVEAU_PRIOR)
         self.koers = 0.0  # Kijkrichting in graden (draairichting van rc-yaw) vanaf de startrichting.
-        self.niveau = 0  # Hoogteniveau t.o.v. de start (-1 = een stap lager).
+        self.niveau = START_NIVEAU  # Huidig hoogteniveau (index in NIVEAU_CM).
         self.stop = threading.Event()  # Gezet door q: direct landen.
         self.max_afwijking: float | None = None  # None = bewust bewegen, geen afstandslimiet.
 
@@ -170,7 +171,7 @@ class Vlucht:
         Met een zoeker kijkt de drone onderweg mee: een kruis dat BEVESTIG_FRAMES vast in beeld staat stopt de vlucht.
         Stopte hij voor een muur, dan wordt die op de kaart gezet.
         """
-        stap("vooruit tot muur")
+        stap(f"vooruit, maximaal {max_s:.1f} s (stopt bij een muur)")
         self.nieuw_nulpunt(None)
         start = vorig = time.monotonic()
         muur, spoor, gezien, gevlogen_s = 0, Spoor(SPOOR_SPRONG), None, 0.0
@@ -219,16 +220,37 @@ class Vlucht:
         else:
             self.draai(360 - graden, richting=-1)
 
-    def beweeg(self, naam: str, seconden: float) -> None:
-        """Een korte, begrensde hoogteverandering (omhoog of omlaag) met rc, daarna stilhangen."""
-        stap(f"{naam} {seconden:.1f} s")
-        self.netto_hoogte_s += seconden * ((naam == "omhoog") - (naam == "omlaag"))
-        self.niveau += (naam == "omhoog") - (naam == "omlaag")
-        self.houd(RICHTING[naam], seconden, max_afwijking=None)
-        self.houd(STIL, 0.6, max_afwijking=None)
+    def hoogte_cm(self) -> float:
+        """Hoogte boven de vloer in cm: de sensor als die iets meldt, anders onze eigen schatting uit rc-tijd."""
+        gemeten = self.tello.get_height()
+        return float(gemeten) if gemeten > 0 else self.hoogte_schatting
 
-    def kleine_stijging(self) -> None:
-        self.beweeg("omhoog", START_OMHOOG_S)
+    def ga_naar_hoogte(self, doel_cm: float, max_s: float = HOOGTE_MAX_S) -> None:
+        """Stijg of daal tot de sensor de gewenste hoogte meldt (maximaal max_s), en hang dan stil."""
+        doel_cm = max(doel_cm, MIN_VLOER_CM)
+        stap(f"naar hoogte {doel_cm:.0f} cm (nu {self.hoogte_cm():.0f})")
+        self.nieuw_nulpunt(None)
+        start = vorig = time.monotonic()
+        while vorig - start < max_s and abs(hoogte := self.hoogte_cm()) and abs(doel_cm - hoogte) > HOOGTE_MARGE_CM:
+            richting = 1 if hoogte < doel_cm else -1
+            self.stuur(Rc(0, 0, richting * HOOGTE_RC, 0))
+            time.sleep(0.05)
+            nu = time.monotonic()
+            self.hoogte_schatting += richting * HOOGTE_CM_PER_S * (nu - vorig)
+            vorig = nu
+        self.houd(STIL, 0.6, max_afwijking=None)
+        self.hoogte_schatting = self.hoogte_cm()
+
+    def naar_niveau(self, niveau: int) -> None:
+        """Ga naar een hoogteniveau uit NIVEAU_CM."""
+        self.ga_naar_hoogte(NIVEAU_CM[niveau])
+        self.niveau = niveau
+
+    def start_hoogte(self) -> None:
+        """Eerst naar beneden tot de vloersensor het laagste niveau meldt (zo kennen we de hoogte), dan naar het startniveau."""
+        stap(f"hoogtesensoren: barometer/vloer {self.tello.get_height()} cm, ToF {self.tello.get_distance_tof()}")
+        self.naar_niveau(0)
+        self.naar_niveau(START_NIVEAU)
 
     def muur_voor(self) -> bool:
         """Staat er een muur recht voor ons? (bevestigd over een paar beelden)"""
@@ -284,17 +306,17 @@ class Vlucht:
         """
         stap("controleren: dichterbij kijken")
         self.nieuw_nulpunt(None)
-        spoor, kwijt, einde = Spoor(SLOT_SPRONG, SCORE_TONEN), 0, time.monotonic() + VERIFIEER_S
+        spoor, einde = Spoor(SLOT_SPRONG, SCORE_TONEN), time.monotonic() + VERIFIEER_S
+        gezien_op = time.monotonic()
         while time.monotonic() < einde:
             marker = zoeker(self.camera.frame)
             lengte = spoor.volg(marker)
             if lengte == 0:
-                kwijt += 1
-                if kwijt >= KWIJT_FRAMES:
+                if time.monotonic() - gezien_op >= KWIJT_S:
                     break
                 self.stuur(STIL)
             else:
-                kwijt = 0
+                gezien_op = time.monotonic()
                 if marker.score >= SCORE_GEVONDEN and lengte >= BEVESTIG_FRAMES:
                     self.stuur(STIL)
                     return marker
@@ -324,9 +346,8 @@ class Vlucht:
         raise Noodstop("Geen kruis gevonden.")
 
     def mogelijke_niveaus(self) -> set[int]:
-        """Hoogteniveaus waar we heen mogen: het huidige en de buren binnen de hoogtegrenzen."""
-        opties = verticale_opties(self.tello.get_height(), self.netto_hoogte_s)
-        return {self.niveau} | {self.niveau + (1 if o == "omhoog" else -1) for o in opties}
+        """Alle hoogteniveaus: de sensor stuurt de hoogte, dus elk niveau is bereikbaar."""
+        return set(range(len(NIVEAU_CM)))
 
     def volgend_standpunt(self, zoeker: Zoeker) -> Marker | bool:
         """Vlieg naar het standpunt dat de kaart kiest, en pas het hoogteniveau aan.
@@ -348,7 +369,7 @@ class Vlucht:
             if self.kaart.wand.sum() != gestopt_voor_muur:
                 break  # Muur in de weg: hier scannen in plaats van doorvliegen.
         if besluit.niveau != self.niveau:
-            self.beweeg("omhoog" if besluit.niveau > self.niveau else "omlaag", HOOGTE_S)
+            self.naar_niveau(besluit.niveau)
         return True
 
     def begrens_dalen(self, rc: Rc) -> Rc:
@@ -356,7 +377,7 @@ class Vlucht:
         if rc.ud >= 0:
             return rc
         hoogte = self.tello.get_height()
-        if self.daal_s <= 0 or 0 < hoogte < MIN_HOOGTE_CM:
+        if self.daal_s <= 0 or 0 < hoogte < MIN_VLOER_CM:
             return rc._replace(ud=0)
         self.daal_s -= LOOP_TIJD_S
         return rc
@@ -378,7 +399,7 @@ class Vlucht:
         self.nieuw_nulpunt(None)
         start = vorig = time.monotonic()
         slot, laatste = Spoor(SLOT_SPRONG), vast  # Nog geen slot: na het draaien klopt de plek van `vast` niet meer.
-        rc, laag, dichtbij, kwijt, herstel_start, vooruit_s = STIL, 0, 0, 0, None, 0.0
+        rc, laag, dichtbij, herstel_start, vooruit_s, gezien_op = STIL, 0, 0, None, 0.0, start
         reden: str | None = None
         while time.monotonic() - start < timeout_s and reden is None:
             frame = self.camera.frame
@@ -387,8 +408,8 @@ class Vlucht:
             vooruit_s += (nu - vorig) * (rc.fb > 0)
             vorig = nu
             onderweg = vooruit_s >= MIN_VOORUIT_S  # Aankomst telt pas nadat we echt naar het kruis gevlogen hebben.
-            if marker is not None and marker.score >= SCORE_GEVONDEN and slot.past(marker):
-                kwijt, laatste, herstel_start, slot.laatste = 0, marker, None, marker
+            if marker is not None and marker.score >= SCORE_TONEN and slot.past(marker):  # Eenmaal vergrendeld: 50% volstaat.
+                laatste, herstel_start, slot.laatste, gezien_op = marker, None, marker, nu
                 dichtbij = dichtbij + 1 if is_dichtbij(marker) else 0
                 laag = laag + 1 if abs(marker.x) < CENTREER_X and marker.y > LANDEN_Y and marker.straal >= REMMEN_STRAAL else 0
                 if onderweg and dichtbij >= AANKOMST_FRAMES:
@@ -399,18 +420,22 @@ class Vlucht:
                     rc = self.begrens_dalen(naar_marker(marker))
                     self.stuur(rc)
             else:
-                kwijt, laag, dichtbij = kwijt + 1, 0, 0
-                if kwijt < KWIJT_FRAMES:
+                laag, dichtbij, kwijt_s = 0, 0, nu - gezien_op
+                if kwijt_s < KWIJT_S:
                     self.stuur(rc)  # Kort kwijt: koers houden.
                 elif onderweg and is_erboven_verdwenen(laatste):
                     reden = "erboven"
-                elif herstel_start is None or time.monotonic() - herstel_start < HERSTEL_S:
-                    herstel_start = herstel_start or time.monotonic()
+                elif kwijt_s < KWIJT_S + STIL_ZOEK_S:
+                    rc = STIL
+                    self.stuur(STIL)  # Eerst stilhangen: bij het vooruitvliegen kantelt de camera en is het beeld onscherp.
+                elif herstel_start is None or nu - herstel_start < HERSTEL_S:
+                    herstel_start = herstel_start or nu
                     slot.laatste = None  # Ontgrendel: elk goed kruis mag weer.
                     richting = -1 if laatste is not None and laatste.x < 0 else 1
                     self.stuur(Rc(0, 0, 0, richting * HERSTEL_RC))  # Draai naar waar het kruis het laatst was.
-                    rc = STIL
                 else:
+                    if laatste is not None:
+                        stap(f"kruis kwijt: laatst x {laatste.x:.2f}, y {laatste.y:.2f}, straal {laatste.straal:.2f}, {vooruit_s:.1f} s vooruit")
                     raise Noodstop("Kruis kwijt.")
             time.sleep(LOOP_TIJD_S)
         if reden is None:

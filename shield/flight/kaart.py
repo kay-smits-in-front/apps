@@ -28,7 +28,8 @@ MIN_WINST = 0.03  # Verwachte kans (van de totale kans 1.0) die een volgend stan
 MIN_RESTKANS = 0.10  # Is de totale resterende kans lager dan dit, dan is de ruimte afgezocht.
 MIN_VERPLAATSING_M = 1.0  # Op hetzelfde niveau opnieuw scannen vanaf bijna dezelfde plek levert weinig op: minstens zover weg.
 WINST_BASIS_M = 1.0  # Maakt dat een heel dichtbij standpunt niet oneindig goed scoort.
-NIVEAU_KOSTEN_M = 1.0  # Wat van hoogte wisselen 'kost' in meters vliegen.
+NIVEAU_KOSTEN_M = 1.0  # Wat één hoogteniveau wisselen 'kost' in meters vliegen.
+MUUR_VEILIG_M = 0.8  # Standpunten dichter bij een muur dan dit scoren lager (weg van de muur, naar het midden).
 WAND_AFSTAND_M = 0.8  # Stopt de drone voor een muur, dan staat die ongeveer zover vóór hem.
 WAND_BREEDTE_M = 1.5  # ...en we markeren zoveel breedte als muur.
 
@@ -62,9 +63,12 @@ def verschil_hoek(a: np.ndarray | float, b: float) -> np.ndarray | float:
 class Kaart:
     """Kansen per cel en hoogteniveau, bekende muren en onze geschatte positie."""
 
-    def __init__(self, niveaus: tuple[int, ...] = (-1, 0, 1)) -> None:
+    def __init__(self, gewichten: tuple[float, ...] = (1.0, 1.0, 1.0)) -> None:
+        """Eén kansenkaart per hoogteniveau (0, 1, 2, ...); `gewichten` is de prior per niveau."""
         self.wand = np.zeros((N, N), bool)
-        self.kansen = {n: np.full((N, N), 1 / (N * N * len(niveaus))) for n in niveaus}
+        self.buiten = np.zeros((N, N), bool)  # Cellen achter een muur: geen kruis en geen route.
+        totaal = sum(gewichten)
+        self.kansen = {n: np.full((N, N), g / totaal / (N * N)) for n, g in enumerate(gewichten)}
         self.x = self.y = 0.0
 
     @staticmethod
@@ -93,10 +97,30 @@ class Kaart:
         gezien = np.zeros((N, N))
         for k, muur in enumerate(kolommen):
             richting = koers + (k + 0.5) * breedte - CAMERA_HOEK / 2
-            bereik = VLAK_BEREIK_M if muur >= VLAK_MUUR else KIJK_BEREIK_M
-            in_beeld = (verschil_hoek(hoek, richting) <= breedte / 2) & (afstand <= bereik)
+            vlak = muur >= VLAK_MUUR
+            in_wig = verschil_hoek(hoek, richting) <= breedte / 2
+            if vlak:  # Een muur: alles daarachter ligt buiten de kamer.
+                self.sluit_buiten(in_wig & (afstand > VLAK_BEREIK_M))
+            in_beeld = in_wig & (afstand <= (VLAK_BEREIK_M if vlak else KIJK_BEREIK_M))
             gezien = np.where(in_beeld, np.maximum(gezien, p_zie(afstand)), gezien)
         self.kansen[niveau] *= 1 - gezien
+
+    def sluit_buiten(self, cellen: np.ndarray) -> None:
+        """Markeer cellen als buiten de kamer: geen kans meer en niet te bereiken."""
+        self.buiten |= cellen
+        for kans in self.kansen.values():
+            kans[self.buiten] = 0.0
+
+    def geblokkeerd(self) -> np.ndarray:
+        """Cellen waar de drone niet door kan: bekende muren en alles wat buiten de kamer ligt."""
+        return self.wand | self.buiten
+
+    def afstand_tot_muur(self) -> np.ndarray:
+        """Per cel de afstand (m) tot de dichtstbijzijnde geblokkeerde cel (oneindig als er geen is)."""
+        blok = self.geblokkeerd().reshape(-1)
+        if not blok.any():
+            return np.full((N, N), np.inf)
+        return _AFSTANDEN[:, blok].min(axis=1).reshape(N, N)
 
     def markeer_wand(self, koers: float, afstand_m: float = WAND_AFSTAND_M) -> None:
         """De drone stopte voor een muur: markeer een stuk muur vóór hem (geen kans meer en niet doorheen vliegen)."""
@@ -115,6 +139,7 @@ class Kaart:
 
     def afstanden(self, start: Cel) -> np.ndarray:
         """Kortste afstand (m) over vrije cellen van `start` naar elke cel (Dijkstra); oneindig als onbereikbaar."""
+        blok = self.geblokkeerd()
         dist = np.full((N, N), np.inf)
         dist[start] = 0.0
         wachtrij = [(0.0, start)]
@@ -124,7 +149,7 @@ class Kaart:
                 continue
             for dr, dc in _BUREN:
                 nr, nc = r + dr, c + dc
-                if 0 <= nr < N and 0 <= nc < N and not self.wand[nr, nc]:
+                if 0 <= nr < N and 0 <= nc < N and not blok[nr, nc]:
                     nd = d + CEL_M * math.hypot(dr, dc)
                     if nd < dist[nr, nc]:
                         dist[nr, nc] = nd
@@ -135,6 +160,7 @@ class Kaart:
         """Kortste route van start naar doel over vrije cellen met A* (hemelsbrede afstand als schatting)."""
         if start == doel:
             return [start]
+        blok = self.geblokkeerd()
         g, vorige = {start: 0.0}, {}
         wachtrij = [(0.0, start)]
         while wachtrij:
@@ -146,7 +172,7 @@ class Kaart:
                 return pad[::-1]
             for dr, dc in _BUREN:
                 buur = (cel[0] + dr, cel[1] + dc)
-                if not (0 <= buur[0] < N and 0 <= buur[1] < N) or self.wand[buur]:
+                if not (0 <= buur[0] < N and 0 <= buur[1] < N) or blok[buur]:
                     continue
                 nieuw = g[cel] + CEL_M * math.hypot(dr, dc)
                 if nieuw < g.get(buur, np.inf):
@@ -159,13 +185,14 @@ class Kaart:
         if self.restkans() < MIN_RESTKANS:
             return None
         start = self.cel(self.x, self.y)
-        afstand = self.afstanden(start)
+        afstand, muur_afstand = self.afstanden(start), self.afstand_tot_muur()
+        veilig = np.clip(muur_afstand / MUUR_VEILIG_M, 0.2, 1.0)  # Dicht bij een muur: lagere score.
         beste: tuple[float, Besluit] | None = None
         for n in mogelijke_niveaus & set(self.kansen):
             winst = self.winst_per_cel(n)
-            kosten = afstand + (NIVEAU_KOSTEN_M if n != niveau else 0.0)
-            mogelijk = np.isfinite(afstand) & ~self.wand & ((afstand >= MIN_VERPLAATSING_M) | (n != niveau))
-            score = np.where(mogelijk, winst / (kosten + WINST_BASIS_M), -1.0)
+            kosten = afstand + NIVEAU_KOSTEN_M * abs(n - niveau)
+            mogelijk = np.isfinite(afstand) & ~self.geblokkeerd() & ((afstand >= MIN_VERPLAATSING_M) | (n != niveau))
+            score = np.where(mogelijk, winst * veilig / (kosten + WINST_BASIS_M), -1.0)
             doel = np.unravel_index(int(np.argmax(score)), score.shape)
             if score[doel] > 0 and winst[doel] >= MIN_WINST and (beste is None or score[doel] > beste[0]):
                 doel_cel = (int(doel[0]), int(doel[1]))

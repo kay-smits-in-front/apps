@@ -1,4 +1,4 @@
-"""Test 1: opstijgen, kleine stijging, 360-graden scan, naar het roze kruis vliegen en erop landen.
+"""Test 1: opstijgen, naar de vloersensor en het startniveau, 360-graden scan, naar het roze kruis vliegen en erop landen.
 
 Start vanuit de projectroot:
     python -m shield.flight.test_1
@@ -13,7 +13,7 @@ from shield.vision.kruis import vind_roze_kruis
 
 def plan(vlucht: Vlucht) -> None:
     vlucht.opstijgen()
-    vlucht.kleine_stijging()
+    vlucht.start_hoogte()
     kruis = vlucht.zoek_kruis(vind_roze_kruis)
     vlucht.vlieg_en_land(vind_roze_kruis, vast=kruis)
 
