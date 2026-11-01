@@ -517,7 +517,7 @@
   }
   function renderAdvice(advice) {
     if (!advice) {
-      el("advice-status").textContent = "Nog geen advies. Draai python advice.py in de three-way-map.";
+      el("advice-status").textContent = "Nog geen advies. Bereken het met de knop op de simpele advies-pagina.";
       return;
     }
     el("advice-status").textContent = `Advies van ${advice.day}. Zwaarste facetten van de forest: ${advice.top_facets.join(", ")}.`;

@@ -105,7 +105,7 @@
   <section class="tool-panel"><h2>Per aandeel</h2><div id="stocks"></div></section>
   <section class="tool-panel">
     <h2>AI-advies per aandeel</h2>
-    <p>De conclusie van alles hierboven. Vier onderdelen wegen elk 25% mee: de LSTM (de laatste 93 dagen van het aandeel), de forest (de twee zwaarste facetten), jouw nieuws en jouw intuïtie. Het dashboard rekent zelf niets: het toont de uitkomst van <code>python advice.py</code>.</p>
+    <p>De conclusie van alles hierboven. Vier onderdelen wegen elk 25% mee: de LSTM (de laatste 93 dagen van het aandeel), de forest (alle facetten hierboven, de zwaarste telt het meest), jouw nieuws en jouw intuïtie. Het advies bereken je met de knop op de <a href="{{ url_for('three_way_advice') }}">simpele advies-pagina</a>; hier staat de laatste uitkomst.</p>
     <p class="helper" id="advice-status"></p>
     <div id="advice"></div>
   </section>

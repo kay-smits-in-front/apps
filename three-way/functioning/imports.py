@@ -5,6 +5,7 @@ Project modules are never imported here, to avoid circular imports.
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 from dataclasses import dataclass, field, replace
@@ -25,6 +26,7 @@ __all__ = [
     "date",
     "json",
     "mean",
+    "os",
     "product",
     "replace",
     "subprocess",

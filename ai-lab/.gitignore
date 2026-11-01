@@ -1,4 +1,5 @@
 runs/*.json
 runs/*.pt
+runs/*.npz
 __pycache__/
 *.egg-info/

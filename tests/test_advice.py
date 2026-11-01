@@ -10,6 +10,7 @@ THREE_WAY = Path(__file__).resolve().parents[1] / "three-way"
 sys.path.insert(0, str(THREE_WAY))
 
 import advice as script  # noqa: E402
+import functioning.advice as adv  # noqa: E402
 from functioning.advice import (
     build_row, decide, final_score, format_actions, format_table, latest_ai_run, save_advice, stale_note,
 )  # noqa: E402
@@ -69,9 +70,10 @@ def test_a_stock_that_doubled_over_the_year_is_only_held():
     assert row.decision.action is Action.HOLD and "winnaar" in row.decision.reason
 
 
-def test_without_ai_the_score_uses_news_and_intuition_only():
+def test_without_ai_a_stock_gets_no_advice_even_when_news_and_intuition_are_negative():
     row = build_row("AAA", [100.0] * 300, 1000.0, True, None, -4.0, -4.0, [])
-    assert row.used == ["nieuws", "intuitie"] and row.score == -4.0 and row.decision.action is Action.SELL
+    assert row.used == ["nieuws", "intuitie"] and row.decision.action is Action.HOLD
+    assert "geen AI-score" in row.decision.reason
 
 
 def test_old_prices_give_a_warning_and_fresh_ones_do_not():
@@ -113,16 +115,10 @@ def test_save_advice_writes_json_for_the_page(tmp_path):
 # ----------------------------------------------------------- the whole run
 
 
-def test_main_asks_scores_runs_the_lab_and_prints_the_actions(tmp_path, monkeypatch, capsys):
-    run = {"result": {"top": ["diepte", "trend"], "weights": {"diepte": 1.0},
-                      "tickers": {"AAA": {"lstm": -4.0, "tree": -4.0}}}}
+def prepare_main(tmp_path, monkeypatch, run):
     holdings = type("H", (), {"quantities": lambda self: {"AAA": 10.0}})
     cache = type("C", (), {"series": lambda self, tickers, day=None: ([flat_series("AAA")], [])})
-    monkeypatch.setattr(script, "Holdings", holdings)
-    monkeypatch.setattr(script, "PriceCache", cache)
-    monkeypatch.setattr(script, "run_ai_lab", lambda: (True, ""))
-    monkeypatch.setattr(script, "latest_ai_run", lambda: run)
-    monkeypatch.setattr(script, "player_labels", lambda tickers, day: {})
+
     class TmpChecks(Checks):
         def __init__(self):
             super().__init__(tmp_path / "checks.json")
@@ -131,16 +127,37 @@ def test_main_asks_scores_runs_the_lab_and_prints_the_actions(tmp_path, monkeypa
         def __init__(self):
             super().__init__(tmp_path / "ledger.json")
 
-    monkeypatch.setattr(script, "Checks", TmpChecks)
-    monkeypatch.setattr(script, "Ledger", TmpLedger)
+    monkeypatch.setattr(script, "Holdings", holdings)
+    monkeypatch.setattr(adv, "PriceCache", cache)
+    monkeypatch.setattr(adv, "run_ai_lab", lambda mode="score": (run is not None, "" if run else "No module named 'numpy'"))
+    monkeypatch.setattr(adv, "latest_ai_run", lambda: run)
+    monkeypatch.setattr(adv, "player_labels", lambda tickers, day: {})
+    for module in (script, adv):
+        monkeypatch.setattr(module, "Checks", TmpChecks)
+    monkeypatch.setattr(adv, "Ledger", TmpLedger)
     monkeypatch.setattr(script, "RuleStore", lambda: type("R", (), {"load": lambda self: (script.Rule(2, 5, 10, 8, 20, 40, 3, 2), None)})())
     monkeypatch.setattr(script, "save_advice", lambda day, rows, top, weights: save_advice(day, rows, top, weights, tmp_path / "advice.json"))
     monkeypatch.setattr(script, "date", type("D", (), {"today": staticmethod(lambda: TODAY), "fromisoformat": date.fromisoformat}))
     answers = iter(["-4", "-4"])
     monkeypatch.setattr("builtins.input", lambda prompt="": next(answers))
+
+
+def test_main_asks_scores_runs_the_lab_and_prints_the_actions(tmp_path, monkeypatch, capsys):
+    run = {"result": {"top": ["diepte", "trend"], "weights": {"diepte": 1.0},
+                      "tickers": {"AAA": {"lstm": -4.0, "tree": -4.0}}}}
+    prepare_main(tmp_path, monkeypatch, run)
     script.main()
     out = capsys.readouterr().out
     assert "ACTIES" in out and "VERKOPEN" in out and "AAA" in out and "diepte, trend" in out
     assert [t.action for t in Ledger(tmp_path / "ledger.json").load()] == ["sell"]
     assert Checks(tmp_path / "checks.json").load()[0].news == -4.0
     assert json.loads((tmp_path / "advice.json").read_text())["rows"][0]["action"] == "sell"
+
+
+def test_main_gives_no_advice_and_records_nothing_when_the_ai_lab_fails(tmp_path, monkeypatch, capsys):
+    prepare_main(tmp_path, monkeypatch, None)
+    with pytest.raises(SystemExit) as stop:
+        script.main()
+    assert "Geen advies" in str(stop.value) and "requirements.txt" in str(stop.value)
+    assert "ACTIES" not in capsys.readouterr().out
+    assert not (tmp_path / "ledger.json").exists() and not (tmp_path / "advice.json").exists()

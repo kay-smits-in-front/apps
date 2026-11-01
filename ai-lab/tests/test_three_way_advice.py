@@ -15,6 +15,7 @@ from lab.features import WARMUP
 from lab.labels import direction_after
 from lab.metrics import base_rate_loss, hit_rate, log_loss
 from lab.models.forest import ForestModel
+from lab.models.lstm import LstmModel, init_params, loss_and_grads
 from lab.scores import direction_score, rsi_score, to_score, trend_score, volume_score
 
 
@@ -123,28 +124,42 @@ def test_metrics_compare_against_the_base_rate_and_count_sides():
 # ------------------------------------------------------------------ lstm
 
 
+def test_lstm_gradients_match_numerical_gradients():
+    rng = np.random.default_rng(0)
+    x, y = rng.normal(size=(6, 5, 3)), np.array([0, 1, 2, 0, 1, 2])
+    weights = np.array([1.0, 2.0, 0.5])
+    params = init_params(3, 4, rng)
+    _, grads = loss_and_grads(params, x, y, weights)
+    for key, grad in grads.items():
+        for index in list(np.ndindex(grad.shape))[:8]:
+            step = 1e-6
+            params[key][index] += step
+            up, _ = loss_and_grads(params, x, y, weights)
+            params[key][index] -= 2 * step
+            down, _ = loss_and_grads(params, x, y, weights)
+            params[key][index] += step
+            assert abs((up - down) / (2 * step) - grad[index]) < 1e-6
+
+
 def test_lstm_learns_a_simple_pattern_and_survives_save_and_load(tmp_path):
-    pytest.importorskip("torch")
-    from lab.models.lstm import LstmModel
     rng = np.random.default_rng(0)
     features = rng.normal(size=(600, 10, 3))
     labels = np.where(features[:, :, 0].mean(axis=1) > 0.2, 2, np.where(features[:, :, 0].mean(axis=1) < -0.2, 0, 1))
-    model = LstmModel(hidden=16, epochs=30, lr=5e-3)
+    model = LstmModel(hidden=16, epochs=30)
     model.fit(features, labels)
     proba = model.predict_proba(features)
     assert proba.shape == (600, 3) and np.allclose(proba.sum(axis=1), 1, atol=1e-5)
     assert log_loss(proba, labels) < base_rate_loss(labels)
-    model.save(tmp_path / "m.pt")
-    assert np.allclose(LstmModel.load(tmp_path / "m.pt").predict_proba(features[:5]), proba[:5], atol=1e-5)
+    model.save(tmp_path / "m.npz")
+    assert np.allclose(LstmModel.load(tmp_path / "m.npz").predict_proba(features[:5]), proba[:5], atol=1e-9)
 
 
 def test_advice_run_end_to_end_scores_every_stock(tmp_path):
-    pytest.importorskip("torch")
     config = CONFIG | {"sequence_days": 20, "lstm_epochs": 1, "train_days": 300, "test_days": 150}
-    result = run(fake_prices(), config, "train", tmp_path / "lstm.pt")
-    assert (tmp_path / "lstm.pt").exists() and set(result["tickers"]) == {"AAA", "BBB"}
+    result = run(fake_prices(), config, "train", tmp_path / "lstm.npz")
+    assert (tmp_path / "lstm.npz").exists() and set(result["tickers"]) == {"AAA", "BBB"}
     assert set(result["evaluation"]) == {"forest", "lstm"} and len(result["top"]) == 2
     for row in result["tickers"].values():
         assert -5 <= row["lstm"] <= 5 and -5 <= row["tree"] <= 5 and set(row["facets"]) == set(three_way_facets())
-    again = run(fake_prices(), config, "score", tmp_path / "lstm.pt")
+    again = run(fake_prices(), config, "score", tmp_path / "lstm.npz")
     assert again["evaluation"] is None and again["tickers"]["AAA"]["lstm"] == result["tickers"]["AAA"]["lstm"]

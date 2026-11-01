@@ -15,6 +15,7 @@ from lab.data import Dataset
 from lab.evaluation import walk_forward
 from lab.metrics import base_rate_loss, hit_rate, log_loss
 from lab.models.forest import ForestModel
+from lab.models.lstm import LstmModel
 from lab.runs import RUNS_DIR, save_run
 from lab.scores import direction_score
 
@@ -29,11 +30,10 @@ CONFIG = {
     "score_full_scale": 0.3,   # kans stijging min kans daling van zoveel geeft score +5
     "top_facets": 2,           # zoveel facetten bepalen de conclusie van de forest
 }
-LSTM_FILE = RUNS_DIR / "lstm.pt"
+LSTM_FILE = RUNS_DIR / "lstm.npz"
 
 
 def make_lstm(config: dict):
-    from lab.models.lstm import LstmModel
     return LstmModel(hidden=config["lstm_hidden"], epochs=config["lstm_epochs"])
 
 
@@ -71,16 +71,12 @@ def train_lstm(prices: dict, config: dict, facets: dict, path: Path = LSTM_FILE)
     return model
 
 
-def fit_forests(prices: dict, config: dict, facets: dict) -> tuple[dict[str, float], list[str], ForestModel]:
-    """Forest op alle facetten (geeft de gewichten), dan een forest op alleen de zwaarste facetten."""
+def fit_forest(prices: dict, config: dict, facets: dict) -> tuple[dict[str, float], list[str], ForestModel]:
+    """Forest op alle facetten. De geleerde gewichten bepalen wat zwaar telt; de zwaarste staan in `top`."""
     flat, _ = build_direction_dataset(prices, config["horizon_days"], config["min_move_pct"], facets)
-    full = ForestModel()
-    full.fit(flat.features, flat.labels)
-    top = full.heaviest(flat.names, config["top_facets"])
-    columns = [flat.names.index(name) for name in top]
-    small = ForestModel()
-    small.fit(flat.features[:, columns], flat.labels)
-    return full.weights(flat.names), top, small
+    forest = ForestModel()
+    forest.fit(flat.features, flat.labels)
+    return forest.weights(flat.names), forest.heaviest(flat.names, config["top_facets"]), forest
 
 
 # -------------------------------------------------------------- vandaag
@@ -90,15 +86,15 @@ def to_direction_score(proba: np.ndarray, config: dict) -> float:
     return round(direction_score(float(proba[0]), float(proba[2]), config["score_full_scale"]), 2)
 
 
-def score_today(prices: dict, config: dict, facets: dict, lstm, top: list[str], small: ForestModel) -> dict:
-    names, columns = list(facets), [list(facets).index(n) for n in top]
+def score_today(prices: dict, config: dict, facets: dict, lstm, forest: ForestModel) -> dict:
+    names = list(facets)
     found = {}
     for ticker, today in today_inputs(prices, facets, config["sequence_days"]).items():
         row = today["facets"]
         found[ticker] = {
             "day": today["day"],
             "lstm": None if today["sequence"] is None else to_direction_score(lstm.predict_proba(today["sequence"][None])[0], config),
-            "tree": to_direction_score(small.predict_proba(row[columns][None])[0], config),
+            "tree": to_direction_score(forest.predict_proba(row[None])[0], config),
             "facets": {n: round(float(v), 2) for n, v in zip(names, row)},
         }
     return found
@@ -113,11 +109,10 @@ def run(prices: dict, config: dict = CONFIG, mode: str = "score", lstm_path: Pat
     if mode == "train" or not lstm_path.exists():
         lstm = train_lstm(prices, config, facets, lstm_path)
     else:
-        from lab.models.lstm import LstmModel
         lstm = LstmModel.load(lstm_path)
-    weights, top, small = fit_forests(prices, config, facets)
+    weights, top, forest = fit_forest(prices, config, facets)
     return {"evaluation": evaluation, "weights": weights, "top": top,
-            "tickers": score_today(prices, config, facets, lstm, top, small)}
+            "tickers": score_today(prices, config, facets, lstm, forest)}
 
 
 def print_evaluation(evaluation: dict) -> None:

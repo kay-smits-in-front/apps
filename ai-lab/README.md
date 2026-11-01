@@ -18,8 +18,10 @@ Eerste experiment: `python experiments/three_way_turns/run.py [pad/naar/prices.j
 Het leert op het verleden, test op de periode erna (met €3,95 per koop en verkoop) en vergelijkt met vasthouden.
 
 Advies voor three-way: `python experiments/three_way_advice/run.py score` (of `train`: toetsen op onbekende dagen en opnieuw trainen).
-Een LSTM (93 dagen, alle facetten op -5 tot +5) en een random forest (gewicht per facet, conclusie van de twee zwaarste)
+Een LSTM (93 dagen, alle facetten op -5 tot +5) en een random forest op alle facetten (de geleerde gewichten bepalen wat zwaar telt)
 voorspellen daling, niets of stijging van minstens 3% binnen 3 handelsdagen. `train` print of ze beter zijn dan de
-basiskans; kijk daar eerst naar. Installeren vraagt ook torch (staat in `pyproject.toml`).
+basiskans; kijk daar eerst naar. Beide modellen zijn eigen numpy-code (`lab/models/forest.py`, `lab/models/lstm.py`): geen torch en geen scikit-learn nodig.
+Alleen het oudere experiment `three_way_turns` gebruikt scikit-learn: `python -m pip install scikit-learn`
+(let op: de naam is `scikit-learn`, niet `sklearn`).
 
 Een nieuw onderwerp: nieuwe adapter plus nieuwe map onder `experiments/`. Een nieuw model: nieuwe klasse in `lab/models/`.

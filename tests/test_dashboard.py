@@ -542,24 +542,92 @@ def test_advice_pages_need_login_and_give_non_admin_nothing(client):
     assert b"Alleen de beheerder" in client.get("/apps/three-way/advice").data
 
 
-def test_admin_sees_the_actions_on_the_simple_page_and_in_the_dashboard_feed(client, monkeypatch):
-    if os.getenv("APP_ENV") == "production":
-        pytest.skip("advice is hidden in production")
-    advice = {"day": "2026-11-02", "top_facets": ["diepte", "trend"], "facet_weights": {},
-              "rows": [{"ticker": "AAA", "invested": True, "parts": {"lstm": -3.0, "forest": -2.0, "nieuws": -4.0, "intuitie": -4.0},
-                        "score": -3.25, "action": "sell", "reason": "score -3.2: verkopen", "labels": []}]}
-    monkeypatch.setattr(app_module, "latest_advice", lambda path=None: advice)
+@pytest.fixture()
+def admin(client):
     with app_module.app.app_context():
         user = app_module.db.session.scalar(app_module.select(app_module.User).where(app_module.User.email == "dash@example.com"))
         user.is_admin = True
         app_module.db.session.commit()
-    try:
-        page = client.get("/apps/three-way/advice").data
-        assert b"VERKOPEN" in page and b"AAA" in page
-        assert client.get("/apps/three-way/dashboard/advice").get_json()["advice"]["rows"][0]["ticker"] == "AAA"
-        assert b"AI-advies per aandeel" in client.get("/apps/three-way/dashboard").data
-    finally:
-        with app_module.app.app_context():
-            user = app_module.db.session.scalar(app_module.select(app_module.User).where(app_module.User.email == "dash@example.com"))
-            user.is_admin = False
-            app_module.db.session.commit()
+    yield client
+    with app_module.app.app_context():
+        user = app_module.db.session.scalar(app_module.select(app_module.User).where(app_module.User.email == "dash@example.com"))
+        user.is_admin = False
+        app_module.db.session.commit()
+
+
+def local_only():
+    if os.getenv("APP_ENV") == "production":
+        pytest.skip("advice is hidden in production")
+
+
+def test_admin_gets_the_buttons_on_the_simple_page_and_the_saved_advice_in_the_feeds(admin, monkeypatch):
+    local_only()
+    advice = {"day": "2026-11-02", "top_facets": ["diepte", "trend"], "facet_weights": {},
+              "rows": [{"ticker": "AAA", "invested": True, "parts": {"lstm": -3.0, "forest": -2.0, "nieuws": -4.0, "intuitie": -4.0},
+                        "score": -3.25, "action": "sell", "reason": "score -3.2: verkopen", "labels": []}]}
+    monkeypatch.setattr(app_module, "latest_advice", lambda path=None: advice)
+    page = admin.get("/apps/three-way/advice").data
+    assert b"Bereken advies" in page and b"/apps/three-way/advice/run" in page and b"advice.js" in page
+    assert b"python advice.py" not in page
+    assert admin.get("/apps/three-way/dashboard/advice").get_json()["advice"]["rows"][0]["ticker"] == "AAA"
+    assert b"AI-advies per aandeel" in admin.get("/apps/three-way/dashboard").data
+
+
+def test_portal_card_for_three_way_opens_the_simple_advice_page(client):
+    assert b'href="/apps/three-way/advice"' in client.get("/dashboard").data
+
+
+def test_run_button_is_closed_to_visitors_and_non_admins(client):
+    local_only()
+    assert app_module.app.test_client().post("/apps/three-way/advice/run", json={}).status_code == 302
+    assert client.post("/apps/three-way/advice/run", json={}).status_code == 403
+
+
+def test_run_button_rejects_scores_outside_minus_five_to_five(admin):
+    local_only()
+    assert admin.post("/apps/three-way/advice/run", json={"news": 6, "intuition": 0}).status_code == 400
+    assert admin.post("/apps/three-way/advice/run", json={"news": "x", "intuition": 0}).status_code == 400
+
+
+def test_run_button_passes_scores_and_mode_and_returns_the_advice(admin, monkeypatch):
+    local_only()
+    seen = []
+    monkeypatch.setattr(app_module, "make_advice", lambda user, news, intuition, mode: seen.append((news, intuition, mode)) or {"day": "2026-11-02", "rows": []})
+    assert admin.post("/apps/three-way/advice/run", json={"news": "2,5", "intuition": -1}).get_json()["day"] == "2026-11-02"
+    admin.post("/apps/three-way/advice/run", json={"news": 0, "intuition": 0, "retrain": True})
+    assert seen == [(2.5, -1.0, "score"), (0.0, 0.0, "train")]
+
+
+def test_run_button_shows_the_reason_and_no_advice_when_the_ai_cannot_run(admin, monkeypatch):
+    local_only()
+    from functioning.advice import AdviceError
+
+    def refuse(user, news, intuition, mode):
+        raise AdviceError("Het AI-lab kon niet draaien, dus er is geen advies.")
+
+    monkeypatch.setattr(app_module, "make_advice", refuse)
+    response = admin.post("/apps/three-way/advice/run", json={"news": 0, "intuition": 0})
+    assert response.status_code == 500 and "geen advies" in response.get_json()["error"]
+
+
+def test_make_advice_computes_records_and_saves_for_the_users_positions(admin, monkeypatch):
+    local_only()
+    import functioning.advice as adv
+    import functioning.storage as storage
+    calls = {}
+    row = adv.build_row("AAA", [100.0] * 300, 1000.0, True, {"lstm": -4.0, "tree": -4.0}, -4.0, -4.0, [])
+    result = adv.AdviceResult(TODAY, [row], ["diepte", "trend"], {"diepte": 1.0}, None, [])
+    monkeypatch.setattr(adv, "compute_advice", lambda quantities, news, intuition, day, cash, mode: calls.update(
+        quantities=quantities, news=news, mode=mode) or result)
+    monkeypatch.setattr(adv, "stocks_in_cash", lambda day: set())
+    monkeypatch.setattr(adv, "record_advice", lambda day, rows, news, intuition, rule: calls.update(recorded=len(rows)) or [])
+    monkeypatch.setattr(adv, "save_advice", lambda day, rows, top, weights: calls.update(saved=top))
+    monkeypatch.setattr(storage, "RuleStore", lambda: type("R", (), {"load": lambda self: (LIVE, None)})())
+    with app_module.app.app_context():
+        user = app_module.db.session.scalar(app_module.select(app_module.User).where(app_module.User.email == "dash@example.com"))
+        app_module.db.session.add(app_module.Position(user_id=user.id, ticker="AAA", quantity=10.0, cost_eur=0))
+        app_module.db.session.commit()
+        answer = app_module.make_advice(user, -4.0, -4.0, "score")
+    assert calls["quantities"] == {"AAA": 10.0} and calls["mode"] == "score" and calls["recorded"] == 1
+    assert calls["saved"] == ["diepte", "trend"]
+    assert answer["rows"][0]["action"] == "sell" and answer["stale"] is None and answer["failed"] == []

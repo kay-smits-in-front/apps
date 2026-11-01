@@ -301,7 +301,7 @@ def dashboard():
         return redirect(url_for("login"))
     apps = [
         {"name": "Three Way", "description": "Beleggingsanalyse en portefeuille-inzichten.",
-         "status": "Lokaal", "icon": "↗", "url": url_for("three_way_dashboard")},
+         "status": "Lokaal", "icon": "↗", "url": url_for("three_way_advice")},
         {"name": "SHIELD", "description": "Basisdashboard voor de DJI Tello: verkenning, mapping en AI-interactie.",
          "status": "Opzet", "icon": "⌁", "url": url_for("shield_dashboard")},
         {"name": "AI-LAB", "description": "Modellen vanaf nul bouwen en streng toetsen. Three Way is het eerste onderwerp.",
@@ -574,12 +574,61 @@ def latest_advice(path: Path | None = None) -> dict | None:
     return json.loads(path.read_text()) if path.exists() else None
 
 
+def advice_form_defaults():
+    """Nieuws en intuïtie van de vorige check, als beginwaarde voor het formulier."""
+    three_way_import()
+    from datetime import date
+    from functioning.storage import Checks
+    previous = Checks.previous(Checks().load(), date.today())
+    return {"news": previous.news if previous else 0, "intuition": previous.intuition if previous else 0}
+
+
 @app.route("/apps/three-way/advice")
 @login_required
 def three_way_advice():
     user = approved_user()
-    return render_template("three_way_advice.html", advice=latest_advice() if user.is_admin and not IS_PRODUCTION else None,
-                           is_admin=user.is_admin)
+    usable = user.is_admin and not IS_PRODUCTION
+    return render_template("three_way_advice.html", is_admin=user.is_admin, production=IS_PRODUCTION,
+                           defaults=advice_form_defaults() if usable else None)
+
+
+def make_advice(user, news, intuition, mode):
+    """Het advies voor de posities van de gebruiker, in het logboek gezet en bewaard. Gooit AdviceError."""
+    three_way_import()
+    from datetime import date
+    from functioning.advice import advice_dict, compute_advice, record_advice, save_advice, stocks_in_cash
+    from functioning.storage import RuleStore
+    day = date.today()
+    quantities = {p.ticker: p.quantity for p in user_positions(user)}
+    with THREE_WAY_LOCK:
+        result = compute_advice(quantities, news, intuition, day, stocks_in_cash(day), mode)
+        record_advice(day, result.rows, news, intuition, RuleStore().load()[0])
+        save_advice(day, result.rows, result.top, result.weights)
+    return advice_dict(day, result.rows, result.top, result.weights) | {"stale": result.stale, "failed": result.failed}
+
+
+@app.route("/apps/three-way/advice/run", methods=["POST"])
+@login_required
+@limiter.limit("30 per hour", override_defaults=True)
+def three_way_advice_run():
+    user = approved_user()
+    if IS_PRODUCTION:
+        return {"error": "Het advies is op Render uitgeschakeld totdat persistente opslag is ingericht."}, 503
+    if not user.is_admin:
+        abort(403)
+    body = request.get_json(silent=True) or {}
+    try:
+        news = read_number(body.get("news", 0), -5, 5, float)
+        intuition = read_number(body.get("intuition", 0), -5, 5, float)
+    except (ValueError, TypeError):
+        return {"error": "Nieuws en intuïtie moeten tussen -5 en +5 liggen."}, 400
+    mode = "train" if body.get("retrain") is True else "score"
+    three_way_import()
+    from functioning.advice import AdviceError
+    try:
+        return make_advice(user, news, intuition, mode)
+    except AdviceError as error:
+        return {"error": str(error)}, 500
 
 
 @app.route("/apps/three-way/dashboard/advice")

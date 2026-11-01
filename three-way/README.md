@@ -17,20 +17,32 @@ Based on three information streems news, financial indicators, and intuiton.
 #### intuition -- gut feeling, observations, financial situation -- 20% 
 
 ### Gebruik
-**Maandag en woensdag: `python advice.py`.** Het vraagt nieuws en intuïtie (Enter = zelfde als vorige keer),
-ververst de koersen, draait het AI-lab en print per aandeel de actie voor de komende 2,5 dag. Dat is alles.
-Het advies staat daarna ook op de pagina "Simpel advies" in het portaal en onderaan het uitgebreide dashboard.
+**Maandag en woensdag, in de app:** start `python app.py` in de hoofdmap, open het portaal en klik op de kaart
+Three Way. Dat is de simpele pagina. Vul nieuws en intuïtie in (-5 tot +5), druk op **Bereken advies** en je ziet per
+aandeel de actie voor de komende 2,5 dag, met daaronder hoe het advies tot stand kwam. De knop ververst de koersen,
+draait de LSTM en de forest, en zet de dag in het logboek (fictieve handel, `data/ledger.json`).
+Het uitgebreide dashboard staat achter de link rechtsboven op die pagina.
+
+Zonder terminal-app kan het ook in de terminal: `python three-way/advice.py` (vanuit de hoofdmap) of `python advice.py`
+(vanuit `three-way`). Zelfde uitkomst.
+
+Werkt het AI-lab niet (bijvoorbeeld een pakket ontbreekt), dan geeft het advies **geen** acties, alleen de reden.
+Eerste keer op een nieuwe machine: `python -m pip install -r requirements.txt` (dat bevat numpy). De melding
+"Could not find platform independent libraries" in PyCharm is onschuldig.
+De LSTM traint zichzelf de eerste keer (ongeveer een halve minuut) en daarna weer met de knop
+**Modellen opnieuw trainen en toetsen** (ongeveer twee minuten; die toont ook of de modellen beter zijn dan de basiskans).
 
 Vier onderdelen wegen elk 25% mee, elk van -5 tot +5: de LSTM (de laatste 93 dagen van het aandeel), de forest
-(de twee zwaarste facetten uit alle koersfacetten), jouw nieuws en jouw intuïtie. Het gemiddelde is de score.
+(alle koersfacetten, de door de forest als belangrijkst gevonden facetten wegen het zwaarst), jouw nieuws en jouw
+intuïtie. Het gemiddelde is de score.
 Belegd en score tot -1,5: verkopen. In cash en score vanaf +1,5: terugkopen. Anders houden. Winnaars worden alleen
-vastgehouden en verkopen die de kosten niet dekken worden HOUDEN (`ADVICE_*` in `constants.py`).
+vastgehouden en verkopen die de kosten niet dekken worden HOUDEN (`ADVICE_*` in `constants.py`). Heeft een aandeel nog
+geen AI-score (te weinig koershistorie), dan staat er HOUDEN zonder advies.
 
 Eens per maand (of als main zegt dat de regel oud is): `python walkforward.py`. Dat zoekt de beste regel
 (`functioning/search.py`): per procentparameter van 0,5% tot 40% in stappen van 1%, stop na 5 stappen zonder
 verbetering, plus grove sprongen om een ander dal te testen. Daarna toetst het de gevonden regel op het laatste jaar
 dat de zoekactie niet zag. Kijk daar naar, niet alleen naar de score op de zoekperiode.
-Eens per maand ook: `python experiments/three_way_advice/run.py train` in `ai-lab` (toets en train opnieuw).
 
 `main.py` (elke ma, wo, vr) blijft bestaan als de uitgebreide check.
 

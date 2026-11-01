@@ -1,0 +1,4 @@
+# Alleen nodig voor het oudere experiment ai-lab/experiments/three_way_turns (gebruikt scikit-learn).
+# Het advies zelf (LSTM en forest) draait met alleen numpy uit requirements.txt.
+-r requirements.txt
+scikit-learn>=1.5,<2.0

@@ -11,11 +11,15 @@ from functioning.constants import (
     ADVICE_SELL_AT,
     AI_EXPERIMENT,
     AI_LAB_DIR,
+    AI_TIMEOUT_SECONDS,
+    PAPER_TRADING,
     PRICES_FILE,
 )
-from functioning.imports import dataclass, date, json, subprocess, sys
-from functioning.rule import Action, Decision, is_winner_at, worth_trading
-from functioning.storage import write_json
+from functioning.imports import dataclass, date, json, os, subprocess, sys
+from functioning.players import PlayersCache, safely
+from functioning.prices import PriceCache, Series
+from functioning.rule import Action, Decision, Rule, is_winner_at, worth_trading
+from functioning.storage import Call, Cash, Check, Checks, Ledger, Trade, write_json
 
 # ------------------------------------------------------------------ score
 
@@ -59,10 +63,13 @@ class AdviceRow:
 
 def build_row(ticker: str, closes: list[float], position_eur: float, invested: bool,
               ai: dict | None, news: float, intuition: float, labels: list[str]) -> AdviceRow:
-    """Eén aandeel: de vier onderdelen, de score en de actie."""
+    """Eén aandeel: de vier onderdelen, de score en de actie. Zonder AI-score geen advies: houden."""
     parts = {"lstm": ai["lstm"] if ai else None, "forest": ai["tree"] if ai else None,
              "nieuws": news, "intuitie": intuition}
     score, used = final_score(parts)
+    if len(used) < len(ADVICE_PARTS):
+        reason = "geen AI-score (te weinig koershistorie): geen advies"
+        return AdviceRow(ticker, closes[-1], invested, parts, score, used, Decision(Action.HOLD, reason), labels)
     worth = worth_trading(position_eur, ADVICE_MOVE_PCT)
     decision = decide(score, invested, is_winner_at(closes, len(closes) - 1), worth)
     return AdviceRow(ticker, closes[-1], invested, parts, score, used, decision, labels)
@@ -87,16 +94,95 @@ def latest_ai_run(folder=AI_LAB_DIR / "runs", experiment: str = AI_EXPERIMENT) -
     return json.loads(files[-1].read_text()) if files else None
 
 
+class AdviceError(Exception):
+    """Het advies kan niet gemaakt worden. De tekst zegt wat er mis is en wat je eraan doet."""
+
+
 def run_ai_lab(prices_file=PRICES_FILE, mode: str = "score") -> tuple[bool, str]:
     """Draai het AI-Lab op de koersen. Geeft (gelukt, de laatste regels uitvoer of de fout)."""
     script = AI_LAB_DIR / "experiments" / AI_EXPERIMENT / "run.py"
     done = subprocess.run([sys.executable, str(script), mode, str(prices_file)], cwd=AI_LAB_DIR,
-                          capture_output=True, text=True)
+                          capture_output=True, text=True, encoding="utf-8", errors="replace",
+                          env={**os.environ, "PYTHONIOENCODING": "utf-8"}, timeout=AI_TIMEOUT_SECONDS)
     return done.returncode == 0, (done.stdout if done.returncode == 0 else done.stderr)[-600:]
 
 
 def ai_by_ticker(run: dict | None) -> dict[str, dict]:
     return run["result"]["tickers"] if run else {}
+
+
+# ---------------------------------------------------------------- compute
+
+
+@dataclass(frozen=True)
+class AdviceResult:
+    day: date
+    rows: list[AdviceRow]
+    top: list[str]
+    weights: dict[str, float]
+    stale: str | None
+    failed: list[str]
+
+
+def stocks_in_cash(day: date, ledger: Ledger | None = None) -> set[str]:
+    """Welke aandelen verkocht zijn en nog niet teruggekocht zijn."""
+    return Ledger.cash_before((ledger or Ledger()).load(), day) if PAPER_TRADING else Cash().load()
+
+
+def player_labels(tickers: list[str], day: date) -> dict[str, list[str]]:
+    """Opvallends uit 'Wie zit erin' (alleen ter info: daar bestaat geen historie van)."""
+    rows = safely(lambda: PlayersCache().rows(tickers, day), {})
+    return {t: rows.get(t, {}).get("labels", []) for t in tickers}
+
+
+def make_rows(series: list[Series], quantities: dict[str, float], cash: set[str], ai: dict[str, dict],
+              news: float, intuition: float, labels: dict[str, list[str]]) -> list[AdviceRow]:
+    return [
+        build_row(s.ticker, s.closes, quantities[s.ticker] * s.closes[-1] * s.fx, s.ticker not in cash,
+                  ai.get(s.ticker), news, intuition, labels.get(s.ticker, []))
+        for s in series
+    ]
+
+
+def ai_run_or_error(mode: str) -> dict:
+    """Draai het AI-Lab en geef de uitkomst. Lukt dat niet, dan is er geen advies."""
+    try:
+        ok, message = run_ai_lab(mode=mode)
+    except subprocess.TimeoutExpired:
+        raise AdviceError("Het AI-lab duurde te lang en is gestopt. Draai het opnieuw.") from None
+    run = latest_ai_run() if ok else None
+    if run is None:
+        raise AdviceError("Het AI-lab kon niet draaien, dus er is geen advies. Installeer de pakketten met "
+                          f"'pip install -r requirements.txt' en probeer opnieuw.\n{message}")
+    return run
+
+
+def compute_advice(quantities: dict[str, float], news: float, intuition: float, day: date,
+                   cash: set[str], mode: str = "score") -> AdviceResult:
+    """Het hele advies, zonder vragen of print. Verversen van koersen, AI-lab, vier onderdelen, acties."""
+    series, failed = PriceCache().series(list(quantities), day)
+    if not series:
+        raise AdviceError("Geen koersen beschikbaar. Controleer je internetverbinding.")
+    run = ai_run_or_error(mode)
+    rows = make_rows(series, quantities, cash, ai_by_ticker(run), news, intuition,
+                     player_labels([s.ticker for s in series], day))
+    stale = stale_note({s.ticker: s.days[-1] for s in series}, day)
+    return AdviceResult(day, rows, run["result"]["top"], run["result"]["weights"], stale, failed)
+
+
+def advice_trades(day: date, rows: list[AdviceRow]) -> list[Trade]:
+    """De acties die geen houden zijn, als fictieve handel tegen de koers van die dag."""
+    return [Trade(day, r.ticker, r.decision.action.value, r.price) for r in rows if r.decision.action is not Action.HOLD]
+
+
+def record_advice(day: date, rows: list[AdviceRow], news: float, intuition: float, rule: Rule,
+                  checks: Checks | None = None, ledger: Ledger | None = None) -> list[Trade]:
+    """Zelfde logboek als main.py: de calls van deze dag, en de fictieve handel."""
+    (checks or Checks()).add(Check(day, news, intuition, [Call(r.ticker, r.decision.action.value, r.price, r.decision.reason)
+                                                          for r in rows], vars(rule)))
+    trades = advice_trades(day, rows)
+    (ledger or Ledger()).record(day, trades)
+    return trades
 
 
 # ------------------------------------------------------------------ print
@@ -135,10 +221,15 @@ def format_actions(rows: list[AdviceRow], labels: dict[str, str], horizon: str) 
 # ------------------------------------------------------------------- save
 
 
-def save_advice(day, rows: list[AdviceRow], top: list[str], weights: dict[str, float], path=ADVICE_FILE) -> None:
-    """De laatste uitkomst voor de simpele pagina in het portaal."""
-    write_json(path, {
+def advice_dict(day: date, rows: list[AdviceRow], top: list[str], weights: dict[str, float]) -> dict:
+    """Het advies als gewone gegevens, voor de simpele pagina en voor data/advice.json."""
+    return {
         "day": day.isoformat(), "top_facets": top, "facet_weights": weights,
         "rows": [{"ticker": r.ticker, "invested": r.invested, "parts": r.parts, "score": round(r.score, 2),
                   "action": r.decision.action.value, "reason": r.decision.reason, "labels": r.labels} for r in rows],
-    })
+    }
+
+
+def save_advice(day: date, rows: list[AdviceRow], top: list[str], weights: dict[str, float], path=ADVICE_FILE) -> None:
+    """De laatste uitkomst voor de simpele pagina in het portaal."""
+    write_json(path, advice_dict(day, rows, top, weights))

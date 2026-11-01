@@ -173,3 +173,4 @@ ADVICE_BUY_AT = 1.5           # in cash en de score is dit positief of hoger: te
 ADVICE_MOVE_PCT = 3.0         # de beweging waar het AI-advies op mikt, voor de kostencontrole
 ADVICE_HORIZON_TEXT = "komende 2,5 dag"
 ADVICE_MAX_PRICE_AGE_DAYS = 4  # oudere koersen (meer dan een weekend) geven een waarschuwing
+AI_TIMEOUT_SECONDS = 1800  # het trainen van de LSTM mag tot een half uur duren
