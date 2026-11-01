@@ -567,6 +567,28 @@ def three_way_dashboard_ai():
     return {"run": run}
 
 
+def latest_advice(path: Path | None = None) -> dict | None:
+    """De laatste uitkomst van advice.py (zie three-way), of None als die er nog niet is."""
+    import json
+    path = path or Path(THREE_WAY_PATH) / "data" / "advice.json"
+    return json.loads(path.read_text()) if path.exists() else None
+
+
+@app.route("/apps/three-way/advice")
+@login_required
+def three_way_advice():
+    user = approved_user()
+    return render_template("three_way_advice.html", advice=latest_advice() if user.is_admin and not IS_PRODUCTION else None,
+                           is_admin=user.is_admin)
+
+
+@app.route("/apps/three-way/dashboard/advice")
+@login_required
+def three_way_dashboard_advice():
+    user = approved_user()
+    return {"advice": latest_advice() if user.is_admin and not IS_PRODUCTION else None}
+
+
 @app.route("/apps/three-way/api/holdings", methods=["GET", "POST"])
 @login_required
 def api_holdings():

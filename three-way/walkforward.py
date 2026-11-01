@@ -1,16 +1,18 @@
 """Tests of the stock rule over rolling periods. Run monthly: python walkforward.py
 
-stability (default): one fixed setting over all periods of two months. The best settings
-    are the ones that beat buy and hold in most periods, recent periods counting more.
-    The best one is saved in data/rule.json, and main and backcasting use it from then on.
+stability (default): one fixed setting over all periods of two months. A directed search
+    (functioning/search.py) looks for the setting that beats buy and hold in most periods,
+    recent periods counting more. The best one is saved in data/rule.json, and main, advice
+    and backcasting use it from then on. The last year is checked separately as a hold-out.
 window: a stricter test. The setting is picked on a year and tested on the two months
     after it, over and over, so nothing is judged on the days it was picked on.
 """
 
-from functioning.constants import REGIME_DAYS, STABILITY_TOP, WF_TEST_DAYS, WF_TRAIN_DAYS
+from functioning.constants import HOLDOUT_WINDOWS, REGIME_DAYS, WF_TEST_DAYS, WF_TRAIN_DAYS
 from functioning.imports import argparse, dataclass, date
 from functioning.market import StockData, load_stock_data
-from functioning.rule import HOLD, Rule
+from functioning.rule import HOLD, LIVE, Rule
+from functioning.search import holdout_result, optimise_from, without_last_windows
 from functioning.storage import RuleStore
 from functioning.testing import (
     RollingTest,
@@ -34,17 +36,30 @@ def per_stock_lines(stocks: list[StockData], rule: Rule) -> list[str]:
     return lines
 
 
+def print_holdout(stocks: list[StockData], starts: list[Rule]) -> None:
+    """Eerlijke controle: zoek op alles behalve het laatste jaar, test daarna op dat jaar."""
+    learned = optimise_from(RollingTest(without_last_windows(stocks)), starts)
+    print(f"\nControle op de laatste {HOLDOUT_WINDOWS} periodes (de zoekactie zag die niet):")
+    for name, rule in (("startinstelling", starts[0]), ("gevonden regel", learned)):
+        result = holdout_result(stocks, rule)
+        print(f"  {name:<16} regel {result.rule_pct:>+6.1f}%  vasthouden {result.hold_pct:>+6.1f}%  "
+              f"periodes gewonnen {result.wins}/{result.windows}")
+
+
 def print_stability() -> None:
     stocks, failed = load_stock_data()
-    ranked = RollingTest(stocks).rank()
-    best = ranked[0].rule
-    print(f"Stabiliteit, perioden van {WF_TEST_DAYS} handelsdagen, alleen aandelen die geen winnaar zijn")
+    saved, _ = RuleStore().load()
+    starts = [saved] if saved == LIVE else [saved, LIVE]
+    test = RollingTest(stocks)
+    best = optimise_from(test, starts)
+    print(f"Zoekactie, perioden van {WF_TEST_DAYS} handelsdagen, alleen aandelen die geen winnaar zijn")
     print("(winnaar = het jaar ervoor verdubbeld, die worden alleen vastgehouden)")
-    print("Gesorteerd op gewogen aandeel gewonnen periodes: recente periodes tellen zwaarder\n")
-    print("\n".join(item.describe() for item in ranked[:STABILITY_TOP]))
+    print("Procentparameters van 0,5% tot 40%, stap 1%, stop na 5 stappen zonder verbetering, plus grove sprongen\n")
+    print("Start: ", test.stability_of(saved).describe() if test.stability_of(saved) else saved.describe())
+    print("Beste: ", test.stability_of(best).describe())
     RuleStore().save(best, date.today())
-    print("\nBovenste instelling opgeslagen in data/rule.json, main gebruikt die vanaf nu:")
-    print(best.describe())
+    print("\nBeste instelling opgeslagen in data/rule.json, main en advice gebruiken die vanaf nu.")
+    print_holdout(stocks, starts)
     print("\nPer aandeel met die regel:")
     print("\n".join(per_stock_lines(stocks, best)))
     if failed:

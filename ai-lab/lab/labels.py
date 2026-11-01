@@ -8,3 +8,12 @@ def falls_after(closes: list[float], i: int, horizon: int, min_drop_pct: float) 
     if i + horizon >= len(closes):
         return None
     return int(closes[i + horizon] / closes[i] - 1 <= -min_drop_pct / 100)
+
+
+def direction_after(closes: list[float], i: int, horizon: int, min_move_pct: float) -> int | None:
+    """0 als de koers `horizon` dagen later minstens `min_move_pct` lager is, 2 als minstens
+    zoveel hoger, anders 1 (geen beweging die de kosten dekt). None als de toekomst nog onbekend is."""
+    if i + horizon >= len(closes):
+        return None
+    move = closes[i + horizon] / closes[i] - 1
+    return 0 if move <= -min_move_pct / 100 else 2 if move >= min_move_pct / 100 else 1

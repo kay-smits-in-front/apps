@@ -1,3 +1,4 @@
 runs/*.json
+runs/*.pt
 __pycache__/
 *.egg-info/

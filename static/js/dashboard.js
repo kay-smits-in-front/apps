@@ -5,6 +5,7 @@
   const source = root.dataset.source;
   const research = root.dataset.research;
   const aiSource = root.dataset.ai;
+  const adviceSource = root.dataset.advice;
   const NS = "http://www.w3.org/2000/svg";
   const COLORS = { hold: "#929bad", a: "#7c8cff", b: "#e58cff", max: "#b5f36d", executed: "#ffb454" };
   const RULE_FIELDS = [
@@ -504,6 +505,28 @@
     el("ai-weights").replaceChildren(table(["Factor", "Gewicht (positief: daling waarschijnlijker)"], rows));
   }
   const pctText = (v) => `${v > 0 ? "+" : ""}${v}%`;
+  const ACTIONS = { sell: "VERKOPEN", buy: "KOPEN", hold: "HOUDEN" };
+  async function loadAdvice() {
+    try {
+      const response = await fetch(adviceSource, { credentials: "same-origin" });
+      if (!(response.headers.get("content-type") || "").includes("json")) throw new Error("Geen data (status " + response.status + ").");
+      renderAdvice((await response.json()).advice);
+    } catch (error) {
+      el("advice-status").textContent = error.message;
+    }
+  }
+  function renderAdvice(advice) {
+    if (!advice) {
+      el("advice-status").textContent = "Nog geen advies. Draai python advice.py in de three-way-map.";
+      return;
+    }
+    el("advice-status").textContent = `Advies van ${advice.day}. Zwaarste facetten van de forest: ${advice.top_facets.join(", ")}.`;
+    const cellOf = (v) => (v === null || v === undefined ? "-" : `${v > 0 ? "+" : ""}${v.toFixed(1)}`);
+    const rows = advice.rows.map((r) => [r.ticker, r.invested ? "belegd" : "cash", cellOf(r.parts.lstm), cellOf(r.parts.forest),
+      cellOf(r.parts.nieuws), cellOf(r.parts.intuitie), cellOf(r.score),
+      html("td", r.action === "sell" ? "neg" : r.action === "buy" ? "pos" : "", ACTIONS[r.action]), r.reason]);
+    el("advice").replaceChildren(table(["Aandeel", "Status", "LSTM", "Forest", "Nieuws", "Intuïtie", "Score", "Actie", "Reden"], rows));
+  }
   function renderGroups(a) {
     const usingGroups = el("groups-on").checked;
     el("group-results").hidden = !usingGroups;
@@ -555,6 +578,7 @@
   }
 
   loadAi();
+  loadAdvice();
   buildFields("a"); buildFields("b"); fillFields("a"); fillFields("b");
   el("presets").replaceChildren(...PRESETS.map(([label, patch]) => {
     const button = html("button", "chip", label);

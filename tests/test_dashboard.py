@@ -523,3 +523,43 @@ def test_ai_runs_lists_newest_first_and_portal_keeps_every_app(client, tmp_path)
     assert client.get("/apps/ai-lab").status_code == 200
     page = client.get("/dashboard").data
     assert all(name in page for name in (b"Three Way", b"SHIELD", b"AI-LAB", b"Thinkwave"))
+
+
+# ------------------------------------------------------------- advice page
+
+
+def test_latest_advice_reads_the_file_or_gives_none(tmp_path):
+    assert app_module.latest_advice(tmp_path / "advice.json") is None
+    (tmp_path / "advice.json").write_text(json.dumps({"day": "2026-11-02", "rows": []}))
+    assert app_module.latest_advice(tmp_path / "advice.json")["day"] == "2026-11-02"
+
+
+def test_advice_pages_need_login_and_give_non_admin_nothing(client):
+    anonymous = app_module.app.test_client()
+    assert anonymous.get("/apps/three-way/advice").status_code == 302
+    assert anonymous.get("/apps/three-way/dashboard/advice").status_code == 302
+    assert client.get("/apps/three-way/dashboard/advice").get_json() == {"advice": None}
+    assert b"Alleen de beheerder" in client.get("/apps/three-way/advice").data
+
+
+def test_admin_sees_the_actions_on_the_simple_page_and_in_the_dashboard_feed(client, monkeypatch):
+    if os.getenv("APP_ENV") == "production":
+        pytest.skip("advice is hidden in production")
+    advice = {"day": "2026-11-02", "top_facets": ["diepte", "trend"], "facet_weights": {},
+              "rows": [{"ticker": "AAA", "invested": True, "parts": {"lstm": -3.0, "forest": -2.0, "nieuws": -4.0, "intuitie": -4.0},
+                        "score": -3.25, "action": "sell", "reason": "score -3.2: verkopen", "labels": []}]}
+    monkeypatch.setattr(app_module, "latest_advice", lambda path=None: advice)
+    with app_module.app.app_context():
+        user = app_module.db.session.scalar(app_module.select(app_module.User).where(app_module.User.email == "dash@example.com"))
+        user.is_admin = True
+        app_module.db.session.commit()
+    try:
+        page = client.get("/apps/three-way/advice").data
+        assert b"VERKOPEN" in page and b"AAA" in page
+        assert client.get("/apps/three-way/dashboard/advice").get_json()["advice"]["rows"][0]["ticker"] == "AAA"
+        assert b"AI-advies per aandeel" in client.get("/apps/three-way/dashboard").data
+    finally:
+        with app_module.app.app_context():
+            user = app_module.db.session.scalar(app_module.select(app_module.User).where(app_module.User.email == "dash@example.com"))
+            user.is_admin = False
+            app_module.db.session.commit()

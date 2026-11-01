@@ -151,3 +151,25 @@ WHY_SCORE_PCT = 1.0           # news or intuition of this size (-5..+5) counts a
 RESEARCH_WINDOW_DAYS = 42     # trading days per period (about two months)
 RESEARCH_MIN_DAYS = 63        # a stock needs this many days before its first period
 RESEARCH_MAX_WINDOWS = 40
+
+
+# Zoekactie naar de beste regel (search.py)
+SEARCH_LOW_PCT = 0.5          # ondergrens van de procentparameters
+SEARCH_HIGH_PCT = 40.0
+SEARCH_STEP_PCT = 1.0
+SEARCH_PATIENCE = 5           # stop een richting na zoveel opeenvolgende stappen zonder verbetering
+SEARCH_JUMPS = (5.0, 10.0, 20.0, 30.0, 40.0)   # grove sprongen om een ander dal te testen
+SEARCH_FIELDS = ("up_pct", "down_pct", "stop_pct", "floor_pct", "turn_pct")
+SEARCH_MAX_ROUNDS = 6         # keer langs alle velden, stopt eerder als niets meer verbetert
+HOLDOUT_WINDOWS = 6           # laatste perioden (ongeveer een jaar) die de zoekactie niet ziet
+
+# Advies van maandag en woensdag (advice.py): LSTM, forest, nieuws en intuïtie wegen even zwaar
+AI_LAB_DIR = Path(__file__).resolve().parent.parent.parent / "ai-lab"
+AI_EXPERIMENT = "three_way_advice"
+ADVICE_FILE = DATA_DIR / "advice.json"
+ADVICE_PARTS = ("lstm", "forest", "nieuws", "intuitie")
+ADVICE_SELL_AT = 1.5          # belegd en de score is dit negatief of lager: verkopen
+ADVICE_BUY_AT = 1.5           # in cash en de score is dit positief of hoger: terugkopen
+ADVICE_MOVE_PCT = 3.0         # de beweging waar het AI-advies op mikt, voor de kostencontrole
+ADVICE_HORIZON_TEXT = "komende 2,5 dag"
+ADVICE_MAX_PRICE_AGE_DAYS = 4  # oudere koersen (meer dan een weekend) geven een waarschuwing

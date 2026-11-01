@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Three Way advies · kay.apps{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
+<div class="subnav"><a href="{{ url_for('dashboard') }}">← Portaal</a><a href="{{ url_for('three_way_dashboard') }}">Uitgebreid dashboard →</a></div>
+<p class="eyebrow">FINANCE · ADVIES</p><h1 class="page-title">Advies voor de komende dagen</h1>
+{% if not is_admin %}
+<section class="tool-panel"><p>Alleen de beheerder ziet het advies.</p></section>
+{% elif not advice %}
+<section class="tool-panel"><p>Nog geen advies. Draai <code>python advice.py</code> in de map three-way, op maandag en woensdag.</p></section>
+{% else %}
+<section class="tool-panel">
+  <h2>Acties van {{ advice.day }}</h2>
+  <p class="helper">LSTM, forest, nieuws en intuïtie wegen elk 25% mee. Dit is een hulpmiddel bij je eigen beslissing, geen garantie: de modellen zijn maar iets beter dan de basiskans.</p>
+  <table class="data"><thead><tr><th>Aandeel</th><th>Actie</th><th>Score</th><th>Reden</th></tr></thead><tbody>
+    {% for row in advice.rows %}<tr><td>{{ row.ticker }}</td><td class="{{ 'neg' if row.action == 'sell' else 'pos' if row.action == 'buy' else '' }}">{{ {'sell': 'VERKOPEN', 'buy': 'KOPEN', 'hold': 'HOUDEN'}[row.action] }}</td><td>{{ '%+.1f'|format(row.score) }}</td><td>{{ row.reason }}</td></tr>{% endfor %}
+  </tbody></table>
+</section>
+{% endif %}
+{% endblock %}

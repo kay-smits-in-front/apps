@@ -1,0 +1,146 @@
+import json
+import sys
+from datetime import date, timedelta
+from pathlib import Path
+from random import Random
+
+import pytest
+
+THREE_WAY = Path(__file__).resolve().parents[1] / "three-way"
+sys.path.insert(0, str(THREE_WAY))
+
+import advice as script  # noqa: E402
+from functioning.advice import (
+    build_row, decide, final_score, format_actions, format_table, latest_ai_run, save_advice, stale_note,
+)  # noqa: E402
+from functioning.constants import ACTION_LABELS  # noqa: E402
+from functioning.prices import Series  # noqa: E402
+from functioning.rule import Action  # noqa: E402
+from functioning.storage import Checks, Ledger  # noqa: E402
+
+TODAY = date(2026, 11, 2)
+
+
+def flat_series(ticker="AAA", length=300, last=100.0):
+    days = [TODAY - timedelta(days=length - 1 - k) for k in range(length)]
+    return Series(ticker, days, [100.0] * (length - 1) + [last], 1.0, [1000.0] * length)
+
+
+# ------------------------------------------------------------ the score
+
+
+def test_four_parts_weigh_the_same_and_missing_parts_are_left_out():
+    score, used = final_score({"lstm": 4.0, "forest": 0.0, "nieuws": -2.0, "intuitie": 2.0})
+    assert score == 1.0 and used == ["lstm", "forest", "nieuws", "intuitie"]
+    score, used = final_score({"lstm": None, "forest": 1.0, "nieuws": 2.0, "intuitie": 3.0})
+    assert score == 2.0 and used == ["forest", "nieuws", "intuitie"]
+    assert final_score({}) == (0.0, [])
+
+
+# ----------------------------------------------------------- the action
+
+
+@pytest.mark.parametrize("score, invested, winner, worth, action", [
+    (-2.0, True, False, True, Action.SELL),
+    (-1.5, True, False, True, Action.SELL),
+    (-1.4, True, False, True, Action.HOLD),
+    (-4.0, True, False, False, Action.HOLD),      # kosten wegen te zwaar
+    (-4.0, True, True, True, Action.HOLD),        # winnaar blijft gehouden
+    (-4.0, False, False, True, Action.HOLD),      # al in cash
+    (2.0, False, False, True, Action.BUY),
+    (2.0, True, False, True, Action.HOLD),        # al belegd
+    (1.4, False, False, True, Action.HOLD),
+])
+def test_action_follows_score_and_status(score, invested, winner, worth, action):
+    assert decide(score, invested, winner, worth).action is action
+
+
+def test_a_small_position_is_not_sold_because_of_the_costs():
+    ai = {"lstm": -4.0, "tree": -4.0}
+    big = build_row("AAA", [100.0] * 300, 1000.0, True, ai, -3.0, -3.0, [])
+    small = build_row("AAA", [100.0] * 300, 100.0, True, ai, -3.0, -3.0, [])
+    assert big.decision.action is Action.SELL and small.decision.action is Action.HOLD
+    assert "kosten" in small.decision.reason
+
+
+def test_a_stock_that_doubled_over_the_year_is_only_held():
+    closes = [50.0] * 260 + [120.0] * 40
+    row = build_row("AAA", closes, 1000.0, True, {"lstm": -5.0, "tree": -5.0}, -5.0, -5.0, [])
+    assert row.decision.action is Action.HOLD and "winnaar" in row.decision.reason
+
+
+def test_without_ai_the_score_uses_news_and_intuition_only():
+    row = build_row("AAA", [100.0] * 300, 1000.0, True, None, -4.0, -4.0, [])
+    assert row.used == ["nieuws", "intuitie"] and row.score == -4.0 and row.decision.action is Action.SELL
+
+
+def test_old_prices_give_a_warning_and_fresh_ones_do_not():
+    assert stale_note({"AAA": TODAY, "BBB": TODAY - timedelta(days=3)}, TODAY) is None
+    note = stale_note({"AAA": TODAY, "BBB": TODAY - timedelta(days=17)}, TODAY)
+    assert "BBB" in note and "AAA" not in note and "LET OP" in note
+
+
+# ------------------------------------------------------------- the AI run
+
+
+def test_latest_ai_run_reads_the_newest_file(tmp_path):
+    assert latest_ai_run(tmp_path) is None
+    (tmp_path / "20261101-000000-three_way_advice.json").write_text(json.dumps({"time": "old"}))
+    (tmp_path / "20261102-000000-three_way_advice.json").write_text(json.dumps({"time": "new"}))
+    (tmp_path / "20261103-000000-other.json").write_text(json.dumps({"time": "other"}))
+    assert latest_ai_run(tmp_path)["time"] == "new"
+
+
+# --------------------------------------------------------------- the list
+
+
+def test_the_action_list_has_one_line_per_stock():
+    rows = [build_row("AAA", [100.0] * 300, 1000.0, True, {"lstm": -4.0, "tree": -4.0}, -3.0, -3.0, ["veel short"]),
+            build_row("BBB", [100.0] * 300, 1000.0, False, None, 0.0, 0.0, [])]
+    text = format_actions(rows, ACTION_LABELS, "komende 2,5 dag")
+    assert "VERKOPEN" in text and "AAA" in text and "HOUDEN" in text and "BBB" in text
+    table = format_table(rows, ACTION_LABELS)
+    assert "veel short" in table and "(2/4 onderdelen)" in table
+
+
+def test_save_advice_writes_json_for_the_page(tmp_path):
+    rows = [build_row("AAA", [100.0] * 300, 1000.0, True, {"lstm": -4.0, "tree": -4.0}, -3.0, -3.0, [])]
+    save_advice(TODAY, rows, ["diepte", "trend"], {"diepte": 0.5}, tmp_path / "advice.json")
+    saved = json.loads((tmp_path / "advice.json").read_text())
+    assert saved["rows"][0]["action"] == "sell" and saved["top_facets"] == ["diepte", "trend"]
+
+
+# ----------------------------------------------------------- the whole run
+
+
+def test_main_asks_scores_runs_the_lab_and_prints_the_actions(tmp_path, monkeypatch, capsys):
+    run = {"result": {"top": ["diepte", "trend"], "weights": {"diepte": 1.0},
+                      "tickers": {"AAA": {"lstm": -4.0, "tree": -4.0}}}}
+    holdings = type("H", (), {"quantities": lambda self: {"AAA": 10.0}})
+    cache = type("C", (), {"series": lambda self, tickers, day=None: ([flat_series("AAA")], [])})
+    monkeypatch.setattr(script, "Holdings", holdings)
+    monkeypatch.setattr(script, "PriceCache", cache)
+    monkeypatch.setattr(script, "run_ai_lab", lambda: (True, ""))
+    monkeypatch.setattr(script, "latest_ai_run", lambda: run)
+    monkeypatch.setattr(script, "player_labels", lambda tickers, day: {})
+    class TmpChecks(Checks):
+        def __init__(self):
+            super().__init__(tmp_path / "checks.json")
+
+    class TmpLedger(Ledger):
+        def __init__(self):
+            super().__init__(tmp_path / "ledger.json")
+
+    monkeypatch.setattr(script, "Checks", TmpChecks)
+    monkeypatch.setattr(script, "Ledger", TmpLedger)
+    monkeypatch.setattr(script, "RuleStore", lambda: type("R", (), {"load": lambda self: (script.Rule(2, 5, 10, 8, 20, 40, 3, 2), None)})())
+    monkeypatch.setattr(script, "save_advice", lambda day, rows, top, weights: save_advice(day, rows, top, weights, tmp_path / "advice.json"))
+    monkeypatch.setattr(script, "date", type("D", (), {"today": staticmethod(lambda: TODAY), "fromisoformat": date.fromisoformat}))
+    answers = iter(["-4", "-4"])
+    monkeypatch.setattr("builtins.input", lambda prompt="": next(answers))
+    script.main()
+    out = capsys.readouterr().out
+    assert "ACTIES" in out and "VERKOPEN" in out and "AAA" in out and "diepte, trend" in out
+    assert [t.action for t in Ledger(tmp_path / "ledger.json").load()] == ["sell"]
+    assert Checks(tmp_path / "checks.json").load()[0].news == -4.0
+    assert json.loads((tmp_path / "advice.json").read_text())["rows"][0]["action"] == "sell"
