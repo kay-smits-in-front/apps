@@ -644,13 +644,34 @@ def model_overview(folder: Path | None = None) -> dict:
     return {"latest": latest, "tested": tested}
 
 
+MODEL_TITLES = {
+    "forest": "Forest (beslisbomen over alle facetten)",
+    "logistisch": "Logistische regressie",
+    "boosted": "Boosted bomen (XGBoost-stijl)",
+    "gam": "GAM (additief, stompjes)",
+    "lstm": "LSTM (oudere run)",
+}
+
+
+def model_names(source: dict | None) -> list[str]:
+    """De modellen in een lijst resultaten of scores, in vaste volgorde (onbekende achteraan)."""
+    found = [name for name in (source or {}) if name not in ("day", "facets")]
+    return sorted(found, key=lambda name: list(MODEL_TITLES).index(name) if name in MODEL_TITLES else len(MODEL_TITLES))
+
+
 @app.route("/apps/three-way/models")
 @login_required
 def three_way_models():
     user = approved_user()
     usable = user.is_admin and not IS_PRODUCTION
-    return render_template("three_way_models.html", is_admin=user.is_admin, production=IS_PRODUCTION,
-                           overview=model_overview() if usable else None)
+    overview = model_overview() if usable else None
+    tested = overview["tested"]["result"]["evaluation"] if overview and overview["tested"] else None
+    today = next(iter(overview["latest"]["result"]["tickers"].values()), None) if overview and overview["latest"] else None
+    three_way_import()
+    from functioning.constants import ADVICE_WEIGHTS
+    return render_template("three_way_models.html", is_admin=user.is_admin, production=IS_PRODUCTION, overview=overview,
+                           titles=MODEL_TITLES, weights=ADVICE_WEIGHTS, tested_models=model_names(tested),
+                           today_models=model_names(today))
 
 
 @app.route("/apps/three-way/dashboard/advice")

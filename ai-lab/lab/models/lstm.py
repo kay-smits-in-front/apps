@@ -5,17 +5,14 @@ kans op daling, niets of stijging. Training met backpropagation door de tijd en 
 
 import numpy as np
 
+from lab.models.numeric import Adam, softmax
+
 CLASSES = 3
 CLIP = 1.0  # grootste toegestane gradiënt-norm, tegen ontsporen
 
 
 def sigmoid(x: np.ndarray) -> np.ndarray:
     return 1.0 / (1.0 + np.exp(-np.clip(x, -30, 30)))
-
-
-def softmax(logits: np.ndarray) -> np.ndarray:
-    shifted = np.exp(logits - logits.max(axis=1, keepdims=True))
-    return shifted / shifted.sum(axis=1, keepdims=True)
 
 
 def init_params(channels: int, hidden: int, rng: np.random.Generator) -> dict[str, np.ndarray]:
@@ -80,23 +77,6 @@ def clip(grads: dict, limit: float = CLIP) -> dict:
     return grads if norm <= limit else {k: g * (limit / norm) for k, g in grads.items()}
 
 
-class Adam:
-    def __init__(self, params: dict, lr: float, weight_decay: float = 1e-4):
-        self.lr, self.decay, self.step = lr, weight_decay, 0
-        self.m = {k: np.zeros_like(v) for k, v in params.items()}
-        self.v = {k: np.zeros_like(v) for k, v in params.items()}
-
-    def update(self, params: dict, grads: dict) -> None:
-        self.step += 1
-        for key, grad in grads.items():
-            grad = grad + self.decay * params[key]
-            self.m[key] = 0.9 * self.m[key] + 0.1 * grad
-            self.v[key] = 0.999 * self.v[key] + 0.001 * grad ** 2
-            m_hat = self.m[key] / (1 - 0.9 ** self.step)
-            v_hat = self.v[key] / (1 - 0.999 ** self.step)
-            params[key] -= self.lr * m_hat / (np.sqrt(v_hat) + 1e-8)
-
-
 class LstmModel:
     def __init__(self, hidden: int = 32, epochs: int = 8, lr: float = 3e-3, batch: int = 128, seed: int = 0):
         self.hidden, self.epochs, self.lr, self.batch, self.seed = hidden, epochs, lr, batch, seed
@@ -111,7 +91,7 @@ class LstmModel:
         rng = np.random.default_rng(self.seed)
         labels = labels.astype(int)
         self.params = init_params(features.shape[2], self.hidden, rng)
-        optimiser = Adam(self.params, self.lr)
+        optimiser = Adam(self.params, self.lr, weight_decay=1e-4)
         weights = self.class_weights(labels)
         for _ in range(self.epochs):
             order = rng.permutation(len(features))

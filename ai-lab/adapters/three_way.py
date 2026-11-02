@@ -100,8 +100,8 @@ def build_direction_dataset(prices: dict[str, dict], horizon: int, min_move_pct:
     return Dataset(np.array(groups), np.array(index), np.array(days), features, np.array(labels), names), closes_by
 
 
-def today_inputs(prices: dict[str, dict], facets: dict[str, Facet], length: int) -> dict[str, dict]:
-    """Per aandeel de facetten van de laatste dag en, als er genoeg historie is, de reeks voor de LSTM."""
+def today_inputs(prices: dict[str, dict], facets: dict[str, Facet], length: int = 0) -> dict[str, dict]:
+    """Per aandeel de facetten van de laatste dag en, als er genoeg historie is, de reeks voor een reeksmodel (alleen als `length` groter dan 0 is)."""
     found = {}
     for ticker, entry in prices.items():
         closes, volumes = entry["closes"], entry.get("volumes", [])
@@ -109,6 +109,6 @@ def today_inputs(prices: dict[str, dict], facets: dict[str, Facet], length: int)
             continue
         matrix = facet_matrix(closes, volumes, facets)
         last = len(matrix) - 1
-        sequence = window_ending_at(channels(matrix, closes), last, length) if last >= length - 1 else None
+        sequence = window_ending_at(channels(matrix, closes), last, length) if length and last >= length - 1 else None
         found[ticker] = {"day": entry["days"][-1], "facets": matrix[last], "sequence": sequence}
     return found

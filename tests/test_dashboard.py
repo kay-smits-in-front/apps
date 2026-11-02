@@ -563,7 +563,7 @@ def local_only():
 def test_admin_gets_the_buttons_on_the_simple_page_and_the_saved_advice_in_the_feeds(admin, monkeypatch):
     local_only()
     advice = {"day": "2026-11-02", "top_facets": ["diepte", "trend"], "facet_weights": {},
-              "rows": [{"ticker": "AAA", "invested": True, "parts": {"lstm": -3.0, "forest": -2.0, "nieuws": -4.0, "intuitie": -4.0},
+              "rows": [{"ticker": "AAA", "invested": True, "parts": {"forest": -2.0, "logistisch": -3.0, "boosted": -3.0, "gam": -3.0, "nieuws": -4.0, "intuitie": -4.0},
                         "score": -3.25, "action": "sell", "reason": "score -3.2: verkopen", "labels": []}]}
     monkeypatch.setattr(app_module, "latest_advice", lambda path=None: advice)
     page = admin.get("/apps/three-way/advice").data
@@ -615,7 +615,7 @@ def test_make_advice_computes_records_and_saves_for_the_users_positions(admin, m
     import functioning.advice as adv
     import functioning.storage as storage
     calls = {}
-    row = adv.build_row("AAA", [100.0] * 300, 1000.0, True, {"lstm": -4.0, "tree": -4.0}, -4.0, -4.0, [])
+    row = adv.build_row("AAA", [100.0] * 300, 1000.0, True, {"forest": -4.0, "logistisch": -4.0, "boosted": -4.0, "gam": -4.0}, -4.0, -4.0, [])
     result = adv.AdviceResult(TODAY, [row], ["diepte", "trend"], {"diepte": 1.0}, None, [])
     monkeypatch.setattr(adv, "compute_advice", lambda quantities, news, intuition, day, cash, mode: calls.update(
         quantities=quantities, news=news, mode=mode) or result)
@@ -637,7 +637,7 @@ def test_model_overview_takes_scores_from_the_newest_run_and_accuracy_from_the_n
     def save(name, evaluation, tag):
         (tmp_path / f"{name}-three_way_advice.json").write_text(json.dumps(
             {"time": name, "result": {"evaluation": evaluation, "tag": tag}}))
-    save("20261101-100000", {"lstm": {}}, "tested")
+    save("20261101-100000", {"forest": {}}, "tested")
     save("20261102-100000", None, "latest")
     overview = app_module.model_overview(tmp_path)
     assert overview["latest"]["result"]["tag"] == "latest" and overview["tested"]["result"]["tag"] == "tested"
@@ -649,12 +649,13 @@ def test_models_page_shows_accuracy_mse_weights_and_scores_for_the_admin(admin, 
     metrics = {"folds": 6, "rows": 100, "log_loss": 1.08, "base_loss": 1.09, "hit_rate": 0.52, "hit_days": 50,
                "accuracy": 0.4, "base_accuracy": 0.36, "mse": 14.0, "base_mse": 16.0}
     run = {"time": "2026-11-02T10:00:00", "result": {
-        "evaluation": {"lstm": metrics, "forest": metrics}, "weights": {"diepte": 0.6, "trend": 0.4}, "top": ["diepte", "trend"],
-        "tickers": {"AAA": {"lstm": -2.5, "tree": 1.0}, "BBB": {"lstm": None, "tree": 0.5}}}}
+        "evaluation": {"forest": metrics, "logistisch": metrics, "boosted": metrics, "gam": metrics}, "weights": {"diepte": 0.6, "trend": 0.4}, "top": ["diepte", "trend"],
+        "tickers": {"AAA": {"forest": 1.0, "logistisch": -2.5, "boosted": 0.5, "gam": 0.5}, "BBB": {"forest": 0.5, "logistisch": None, "boosted": 0.5, "gam": 0.5}}}}
     monkeypatch.setattr(app_module, "model_overview", lambda folder=None: {"latest": run, "tested": run})
     page = admin.get("/apps/three-way/models").data.decode()
     assert "Accuracy" in page and "MSE in scores" in page and "diepte" in page and "AAA" in page
-    assert page.count("beter dan de basis") >= 4 and "-2.5" in page
+    assert page.count("beter dan de basis") >= 12 and "-2.5" in page
+    assert "Logistische regressie" in page and "weegt 25% mee" in page and "weegt 10% mee" in page and "LSTM" not in page
 
 
 def test_models_page_is_closed_to_non_admins(client):

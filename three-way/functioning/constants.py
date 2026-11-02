@@ -163,14 +163,23 @@ SEARCH_FIELDS = ("up_pct", "down_pct", "stop_pct", "floor_pct", "turn_pct")
 SEARCH_MAX_ROUNDS = 6         # keer langs alle velden, stopt eerder als niets meer verbetert
 HOLDOUT_WINDOWS = 6           # laatste perioden (ongeveer een jaar) die de zoekactie niet ziet
 
-# Advies van maandag en woensdag (advice.py): LSTM, forest, nieuws en intuïtie wegen even zwaar
+# Advies van maandag en woensdag (advice.py): elk onderdeel een score van -5 tot +5, samen gewogen tot 100%
 AI_LAB_DIR = Path(__file__).resolve().parent.parent.parent / "ai-lab"
 AI_EXPERIMENT = "three_way_advice"
 ADVICE_FILE = DATA_DIR / "advice.json"
-ADVICE_PARTS = ("lstm", "forest", "nieuws", "intuitie")
+ADVICE_WEIGHTS = {            # de drie modellen samen 30%, de forest (beslisbomen over de facetten) en het nieuws elk 25%
+    "logistisch": 0.10,
+    "boosted": 0.10,
+    "gam": 0.10,
+    "forest": 0.25,
+    "nieuws": 0.25,
+    "intuitie": 0.20,
+}
+ADVICE_PARTS = tuple(ADVICE_WEIGHTS)
+assert abs(sum(ADVICE_WEIGHTS.values()) - 1.0) < 1e-9, "de gewichten van het advies moeten samen 100% zijn"
 ADVICE_SELL_AT = 1.5          # belegd en de score is dit negatief of lager: verkopen
 ADVICE_BUY_AT = 1.5           # in cash en de score is dit positief of hoger: terugkopen
 ADVICE_MOVE_PCT = 3.0         # de beweging waar het AI-advies op mikt, voor de kostencontrole
 ADVICE_HORIZON_TEXT = "komende 2,5 dag"
 ADVICE_MAX_PRICE_AGE_DAYS = 4  # oudere koersen (meer dan een weekend) geven een waarschuwing
-AI_TIMEOUT_SECONDS = 1800  # het trainen van de LSTM mag tot een half uur duren
+AI_TIMEOUT_SECONDS = 1800  # toetsen en trainen mag tot een half uur duren

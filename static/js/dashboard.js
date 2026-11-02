@@ -522,10 +522,10 @@
     }
     el("advice-status").textContent = `Advies van ${advice.day}. Zwaarste facetten van de forest: ${advice.top_facets.join(", ")}.`;
     const cellOf = (v) => (v === null || v === undefined ? "-" : `${v > 0 ? "+" : ""}${v.toFixed(1)}`);
-    const rows = advice.rows.map((r) => [r.ticker, r.invested ? "belegd" : "cash", cellOf(r.parts.lstm), cellOf(r.parts.forest),
-      cellOf(r.parts.nieuws), cellOf(r.parts.intuitie), cellOf(r.score),
+    const rows = advice.rows.map((r) => [r.ticker, r.invested ? "belegd" : "cash", cellOf(r.parts.forest), cellOf(r.parts.logistisch),
+      cellOf(r.parts.boosted), cellOf(r.parts.gam), cellOf(r.parts.nieuws), cellOf(r.parts.intuitie), cellOf(r.score),
       html("td", r.action === "sell" ? "neg" : r.action === "buy" ? "pos" : "", ACTIONS[r.action]), r.reason]);
-    el("advice").replaceChildren(table(["Aandeel", "Status", "LSTM", "Forest", "Nieuws", "Intuïtie", "Score", "Actie", "Reden"], rows));
+    el("advice").replaceChildren(table(["Aandeel", "Status", "Forest", "Logistisch", "Boosted", "GAM", "Nieuws", "Intuïtie", "Score", "Actie", "Reden"], rows));
   }
   function renderGroups(a) {
     const usingGroups = el("groups-on").checked;

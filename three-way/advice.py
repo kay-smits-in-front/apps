@@ -1,5 +1,5 @@
 """Het advies, in de terminal: python three-way/advice.py (of in de app via de knop op de simpele pagina).
-Het vraagt nieuws en intuïtie, draait het AI-lab (LSTM en forest) en geeft per aandeel de actie
+Het vraagt nieuws en intuïtie, draait het AI-lab (forest, logistisch model, boosted bomen en GAM) en geeft per aandeel de actie
 voor de komende dagen. Zonder AI-lab geen advies."""
 
 from functioning.advice import (
@@ -12,12 +12,16 @@ from functioning.advice import (
     stocks_in_cash,
 )
 from functioning.analysis import ask_scores
-from functioning.constants import ACTION_LABELS, ADVICE_BUY_AT, ADVICE_HORIZON_TEXT, ADVICE_SELL_AT, PAPER_TRADING
+from functioning.constants import ACTION_LABELS, ADVICE_BUY_AT, ADVICE_WEIGHTS, ADVICE_HORIZON_TEXT, ADVICE_SELL_AT, PAPER_TRADING
 from functioning.imports import date, sys
 from functioning.market import Holdings
 from functioning.rule import Rule
 from functioning.storage import Call, Cash, Check, Checks, RuleStore
 from main import check_title, confirm_trades, last_scores
+
+
+def weights_text() -> str:
+    return ", ".join(f"{name} {weight:.0%}" for name, weight in ADVICE_WEIGHTS.items())
 
 
 def record_confirmed(day: date, rows, news: float, intuition: float, rule: Rule, cash: set[str]) -> None:
@@ -33,7 +37,7 @@ def main() -> None:
     news, intuition = ask_scores(*last_scores(Checks().load(), day))
     quantities = Holdings().quantities()
     cash = stocks_in_cash(day)
-    print("\nKoersen verversen en AI-lab draaien (LSTM en forest) ...")
+    print("\nKoersen verversen en AI-lab draaien (vier modellen) ...")
     try:
         result = compute_advice(quantities, news, intuition, day, cash)
     except AdviceError as error:
@@ -41,7 +45,7 @@ def main() -> None:
     if result.stale:
         print(f"\n{result.stale}\n")
     print(f"\nZwaarste facetten van de forest: {', '.join(result.top)}")
-    print(f"Gewicht per onderdeel: LSTM, forest, nieuws en intuïtie elk 25%. "
+    print(f"Gewicht per onderdeel: {weights_text()}. "
           f"Verkopen vanaf score -{ADVICE_SELL_AT:g}, terugkopen vanaf +{ADVICE_BUY_AT:g}.\n")
     print(format_table(result.rows, ACTION_LABELS))
     if result.failed:

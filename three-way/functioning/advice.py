@@ -1,6 +1,6 @@
-"""Het advies van maandag en woensdag. Vier onderdelen wegen elk even zwaar mee:
-de LSTM, de forest (de zwaarste facetten), het nieuws en de intuïtie, elk van -5 tot +5.
-Het gemiddelde is de score van een aandeel, en de score met de status geeft de actie."""
+"""Het advies van maandag en woensdag. Zes onderdelen, elk van -5 tot +5, wegen mee volgens ADVICE_WEIGHTS:
+drie modellen (logistisch, boosted bomen, GAM), de forest (beslisbomen over de facetten), het nieuws en de intuïtie.
+Het gewogen gemiddelde is de score van een aandeel, en de score met de status geeft de actie."""
 
 from functioning.constants import (
     ADVICE_BUY_AT,
@@ -8,6 +8,7 @@ from functioning.constants import (
     ADVICE_MAX_PRICE_AGE_DAYS,
     ADVICE_MOVE_PCT,
     ADVICE_PARTS,
+    ADVICE_WEIGHTS,
     ADVICE_SELL_AT,
     AI_EXPERIMENT,
     AI_LAB_DIR,
@@ -25,10 +26,11 @@ from functioning.storage import Call, Cash, Check, Checks, Ledger, Trade, write_
 
 
 def final_score(parts: dict[str, float | None]) -> tuple[float, list[str]]:
-    """Gemiddelde van de onderdelen die er zijn (even zwaar), en welke dat zijn.
-    Zonder onderdelen is de score 0."""
+    """Gewogen gemiddelde van de onderdelen die er zijn, en welke dat zijn. Ontbreekt er een, dan verdelen
+    de andere zijn gewicht naar verhouding. Zonder onderdelen is de score 0."""
     used = {name: parts[name] for name in ADVICE_PARTS if parts.get(name) is not None}
-    return (sum(used.values()) / len(used) if used else 0.0), list(used)
+    weight = sum(ADVICE_WEIGHTS[name] for name in used)
+    return (sum(ADVICE_WEIGHTS[name] * value for name, value in used.items()) / weight if used else 0.0), list(used)
 
 
 def decide(score: float, invested: bool, winner: bool, worth: bool) -> Decision:
@@ -64,8 +66,8 @@ class AdviceRow:
 def build_row(ticker: str, closes: list[float], position_eur: float, invested: bool,
               ai: dict | None, news: float, intuition: float, labels: list[str]) -> AdviceRow:
     """Eén aandeel: de vier onderdelen, de score en de actie. Zonder AI-score geen advies: houden."""
-    parts = {"lstm": ai["lstm"] if ai else None, "forest": ai["tree"] if ai else None,
-             "nieuws": news, "intuitie": intuition}
+    parts = {name: (ai or {}).get(name) for name in ADVICE_PARTS if name not in ("nieuws", "intuitie")}
+    parts |= {"nieuws": news, "intuitie": intuition}
     score, used = final_score(parts)
     if len(used) < len(ADVICE_PARTS):
         reason = "geen AI-score (te weinig koershistorie): geen advies"
@@ -193,7 +195,7 @@ def cell(value: float | None, width: int) -> str:
 
 
 def format_header() -> str:
-    return (f"{'Ticker':<10}{'Status':<8}{'LSTM':>7}{'Forest':>8}{'Nieuws':>8}{'Intuitie':>10}{'Score':>8}  "
+    return (f"{'Ticker':<10}{'Status':<8}{'Forest':>8}{'Logit':>7}{'Boost':>7}{'GAM':>6}{'Nieuws':>8}{'Intuitie':>10}{'Score':>8}  "
             f"{'Actie':<10}Reden")
 
 
@@ -201,8 +203,8 @@ def format_row(row: AdviceRow, labels: dict[str, str]) -> str:
     p = row.parts
     partial = f" ({len(row.used)}/{len(ADVICE_PARTS)} onderdelen)" if len(row.used) < len(ADVICE_PARTS) else ""
     note = f"{partial}  [{', '.join(row.labels)}]" if row.labels else partial
-    return (f"{row.ticker:<10}{'belegd' if row.invested else 'cash':<8}{cell(p['lstm'], 7)}{cell(p['forest'], 8)}"
-            f"{cell(p['nieuws'], 8)}{cell(p['intuitie'], 10)}{cell(row.score, 8)}  "
+    return (f"{row.ticker:<10}{'belegd' if row.invested else 'cash':<8}{cell(p['forest'], 8)}{cell(p['logistisch'], 7)}"
+            f"{cell(p['boosted'], 7)}{cell(p['gam'], 6)}{cell(p['nieuws'], 8)}{cell(p['intuitie'], 10)}{cell(row.score, 8)}  "
             f"{labels[row.decision.action.value]:<10}{row.decision.reason}{note}")
 
 

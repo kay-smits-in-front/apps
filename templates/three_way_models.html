@@ -5,7 +5,7 @@
 <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
 <link rel="stylesheet" href="{{ url_for('static', filename='css/models.css') }}">
 <div class="subnav"><a href="{{ url_for('three_way_advice') }}">← Advies</a><a href="{{ url_for('three_way_dashboard') }}">Uitgebreid dashboard →</a></div>
-<p class="eyebrow">FINANCE · MODELLEN</p><h1 class="page-title">LSTM en forest los bekeken</h1>
+<p class="eyebrow">FINANCE · MODELLEN</p><h1 class="page-title">De modellen los bekeken</h1>
 {% if not is_admin %}
 <section class="tool-panel"><p>Alleen de beheerder ziet de modellen.</p></section>
 {% elif production %}
@@ -36,10 +36,10 @@
   {% else %}
   <p class="helper">Getoetst op dagen die de modellen niet kenden ({{ when(tested.time) }}). Elke maat staat naast een simpele <b>basis</b> die niets weet: de accuracy van altijd de vaakste klasse, en de MSE van altijd het gemiddelde geven. Een model is pas nuttig als het de basis verslaat.</p>
   <div class="model-grid">
-    {% for key, title in [("lstm", "LSTM (93 dagen per aandeel)"), ("forest", "Forest (alle facetten)")] %}
+    {% for key in tested_models %}
     {% set e = tested.result.evaluation[key] %}
     <div class="model-card">
-      <h3>{{ title }}</h3>
+      <h3>{{ titles.get(key, key) }}{% if key in weights %} <span class="helper">weegt {{ '%.0f'|format(weights[key] * 100) }}% mee</span>{% endif %}</h3>
       {{ pair("Accuracy (daling, niets of stijging goed)", e.accuracy, e.base_accuracy, false, 1, true) }}
       {{ pair("MSE in scores (-5 tot +5), lager is beter", e.mse, e.base_mse, true, 2) }}
       {{ pair("Verlies op de kansen, lager is beter", e.log_loss, e.base_loss, true, 4) }}
@@ -79,10 +79,10 @@
 <section class="tool-panel">
   <h2>Wat zeggen ze nu per aandeel?</h2>
   <p class="helper">Score van -5 (daling verwacht) tot +5 (stijging verwacht), volgens de run van {{ when(latest.time) }}. Nieuws en intuïtie zitten hier niet in.</p>
-  <table class="data"><thead><tr><th>Aandeel</th><th>LSTM</th><th>Forest</th></tr></thead><tbody>
+  <table class="data"><thead><tr><th>Aandeel</th>{% for key in today_models %}<th>{{ 'GAM' if key == 'gam' else key|capitalize }}</th>{% endfor %}</tr></thead><tbody>
   {% for ticker, row in latest.result.tickers.items() %}
     <tr><td>{{ ticker }}</td>
-    {% for value in [row.lstm, row.tree] %}
+    {% for key in today_models %}{% set value = row.get(key) %}
       <td>{% if value is none %}-{% else %}
         <svg viewBox="0 0 200 14" width="160" height="14" preserveAspectRatio="none" role="img" aria-label="{{ '%+.1f'|format(value) }}">
           <rect class="bar-track" x="0" y="3" width="200" height="8" rx="4"/>

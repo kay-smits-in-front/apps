@@ -20,7 +20,7 @@ Based on three information streems news, financial indicators, and intuiton.
 **Maandag en woensdag, in de app:** start `python app.py` in de hoofdmap, open het portaal en klik op de kaart
 Three Way. Dat is de simpele pagina. Vul nieuws en intuïtie in (-5 tot +5), druk op **Bereken advies** en je ziet per
 aandeel de actie voor de komende 2,5 dag, met daaronder hoe het advies tot stand kwam. De knop ververst de koersen,
-draait de LSTM en de forest, en zet de dag in het logboek (fictieve handel, `data/ledger.json`).
+draait de vier modellen, en zet de dag in het logboek (fictieve handel, `data/ledger.json`).
 Het uitgebreide dashboard staat achter de link rechtsboven op die pagina.
 
 Zonder terminal-app kan het ook in de terminal: `python three-way/advice.py` (vanuit de hoofdmap) of `python advice.py`
@@ -29,12 +29,13 @@ Zonder terminal-app kan het ook in de terminal: `python three-way/advice.py` (va
 Werkt het AI-lab niet (bijvoorbeeld een pakket ontbreekt), dan geeft het advies **geen** acties, alleen de reden.
 Eerste keer op een nieuwe machine: `python -m pip install -r requirements.txt` (dat bevat numpy). De melding
 "Could not find platform independent libraries" in PyCharm is onschuldig.
-De LSTM traint zichzelf de eerste keer (ongeveer een halve minuut) en daarna weer met de knop
-**Modellen opnieuw trainen en toetsen** (ongeveer twee minuten; die toont ook of de modellen beter zijn dan de basiskans).
+De modellen leren bij elke berekening opnieuw (ongeveer 25 seconden). De knop **Modellen opnieuw trainen en toetsen**
+duurt ongeveer een minuut en toetst ze ook op onbekende dagen. De uitkomst zie je op de pagina "Modellen bekijken".
 
-Vier onderdelen wegen elk 25% mee, elk van -5 tot +5: de LSTM (de laatste 93 dagen van het aandeel), de forest
-(alle koersfacetten, de door de forest als belangrijkst gevonden facetten wegen het zwaarst), jouw nieuws en jouw
-intuïtie. Het gemiddelde is de score.
+Zes onderdelen, elk van -5 tot +5, wegen mee (`ADVICE_WEIGHTS` in `constants.py`, samen 100%):
+de forest 25% (beslisbomen over alle koersfacetten; de zwaarste facetten tellen daarin het meest), jouw nieuws 25%,
+jouw intuïtie 20%, en drie modellen op dezelfde facetten elk 10%: een logistische regressie, boosted bomen en een GAM.
+De gewogen score is de score van een aandeel.
 Belegd en score tot -1,5: verkopen. In cash en score vanaf +1,5: terugkopen. Anders houden. Winnaars worden alleen
 vastgehouden en verkopen die de kosten niet dekken worden HOUDEN (`ADVICE_*` in `constants.py`). Heeft een aandeel nog
 geen AI-score (te weinig koershistorie), dan staat er HOUDEN zonder advies.

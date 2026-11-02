@@ -48,10 +48,12 @@
     el("details-note").textContent =
       `Zwaarste facetten volgens de forest: ${top}. Scores lopen van -5 tot +5; verkopen vanaf -1,5, terugkopen vanaf +1,5.`;
     const rows = advice.rows.map((r) => [
-      cell(r.ticker), cell(r.invested ? "belegd" : "cash"), cell(score(r.parts.lstm)), cell(score(r.parts.forest)),
-      cell(score(r.parts.nieuws)), cell(score(r.parts.intuitie)), cell(score(r.score)),
+      cell(r.ticker), cell(r.invested ? "belegd" : "cash"), cell(score(r.parts.forest)), cell(score(r.parts.logistisch)),
+      cell(score(r.parts.boosted)), cell(score(r.parts.gam)), cell(score(r.parts.nieuws)), cell(score(r.parts.intuitie)),
+      cell(score(r.score)),
     ]);
-    el("details").replaceChildren(table(["Aandeel", "Status", "LSTM", "Forest", "Nieuws", "Intuïtie", "Score"], rows));
+    el("details").replaceChildren(table(
+      ["Aandeel", "Status", "Forest 25%", "Logistisch 10%", "Boosted 10%", "GAM 10%", "Nieuws 25%", "Intuïtie 20%", "Score"], rows));
     el("details-panel").hidden = false;
   }
 

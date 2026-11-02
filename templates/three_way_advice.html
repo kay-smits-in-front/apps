@@ -11,7 +11,7 @@
 {% else %}
 <section class="tool-panel" id="advice-page" data-run="{{ url_for('three_way_advice_run') }}" data-saved="{{ url_for('three_way_dashboard_advice') }}" data-csrf="{{ csrf_token() }}">
   <h2>Maandag en woensdag</h2>
-  <p class="helper">Vul je gevoel over het nieuws en je intuïtie in (-5 = slecht, +5 = goed) en druk op de knop. De LSTM, de forest, het nieuws en je intuïtie wegen elk 25% mee.</p>
+  <p class="helper">Vul je gevoel over het nieuws en je intuïtie in (-5 = slecht, +5 = goed) en druk op de knop. Wegingen: forest 25%, nieuws 25%, intuïtie 20% en drie modellen (logistisch, boosted bomen, GAM) elk 10%.</p>
   <form id="advice-form" class="tool-form">
     <label>Nieuws <input type="number" id="news" min="-5" max="5" step="0.5" value="{{ defaults.news }}" required></label>
     <label>Intuïtie <input type="number" id="intuition" min="-5" max="5" step="0.5" value="{{ defaults.intuition }}" required></label>

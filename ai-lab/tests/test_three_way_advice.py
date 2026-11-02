@@ -9,12 +9,14 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from adapters.three_way import build_direction_dataset, three_way_facets, today_inputs
-from experiments.three_way_advice.run import CONFIG, run
+from experiments.three_way_advice.run import CONFIG, MODEL_NAMES, run
 from lab.facets import FACETS, facet_row, facet_set
 from lab.features import WARMUP
 from lab.labels import direction_after
 from lab.metrics import accuracy, base_accuracy, base_rate_loss, base_score_mse, hit_rate, log_loss, score_mse
+from lab.models.boosted import BoostedModel
 from lab.models.forest import ForestModel
+from lab.models.logit import LogitModel
 from lab.models.lstm import LstmModel, init_params, loss_and_grads
 from lab.scores import direction_score, rsi_score, to_score, trend_score, volume_score
 
@@ -154,15 +156,15 @@ def test_lstm_learns_a_simple_pattern_and_survives_save_and_load(tmp_path):
     assert np.allclose(LstmModel.load(tmp_path / "m.npz").predict_proba(features[:5]), proba[:5], atol=1e-9)
 
 
-def test_advice_run_end_to_end_scores_every_stock(tmp_path):
-    config = CONFIG | {"sequence_days": 20, "lstm_epochs": 1, "train_days": 300, "test_days": 150}
-    result = run(fake_prices(), config, "train", tmp_path / "lstm.npz")
-    assert (tmp_path / "lstm.npz").exists() and set(result["tickers"]) == {"AAA", "BBB"}
-    assert set(result["evaluation"]) == {"forest", "lstm"} and len(result["top"]) == 2
+def test_advice_run_end_to_end_scores_every_stock_with_every_model(tmp_path):
+    config = CONFIG | {"boosted_rounds": 5, "gam_rounds": 5, "train_days": 300, "test_days": 150}
+    result = run(fake_prices(), config, "train")
+    assert set(result["tickers"]) == {"AAA", "BBB"} and len(result["top"]) == 2
+    assert set(result["evaluation"]) == set(MODEL_NAMES)
     for row in result["tickers"].values():
-        assert -5 <= row["lstm"] <= 5 and -5 <= row["tree"] <= 5 and set(row["facets"]) == set(three_way_facets())
-    again = run(fake_prices(), config, "score", tmp_path / "lstm.npz")
-    assert again["evaluation"] is None and again["tickers"]["AAA"]["lstm"] == result["tickers"]["AAA"]["lstm"]
+        assert all(-5 <= row[name] <= 5 for name in MODEL_NAMES) and set(row["facets"]) == set(three_way_facets())
+    again = run(fake_prices(), config, "score")
+    assert again["evaluation"] is None and again["tickers"]["AAA"] == result["tickers"]["AAA"]
 
 
 def test_accuracy_and_score_mse_against_their_baselines():
@@ -174,3 +176,57 @@ def test_accuracy_and_score_mse_against_their_baselines():
     assert base_score_mse(labels) == pytest.approx(12.5)          # altijd 0 geven: (25 + 25) / 4
     wrong = sure[::-1]
     assert score_mse(wrong, labels, full_scale=1.0) > base_score_mse(labels)
+
+
+# ------------------------------------------------- logistisch, boosted, GAM
+
+
+def signal_data(seed: int = 0, rows: int = 3000):
+    rng = np.random.default_rng(seed)
+    features = rng.normal(size=(rows, 5)) * 2
+    return features, rng
+
+
+def labels_from(signal: np.ndarray) -> np.ndarray:
+    return np.where(signal > 1.0, 2, np.where(signal < -1.0, 0, 1))
+
+
+def test_logit_learns_a_linear_signal_and_gives_valid_probabilities():
+    features, rng = signal_data()
+    labels = labels_from(features[:, 1] + rng.normal(0, 1, len(features)))
+    model = LogitModel()
+    model.fit(features[:2000], labels[:2000])
+    proba = model.predict_proba(features[2000:])
+    assert proba.shape == (1000, 3) and np.allclose(proba.sum(axis=1), 1)
+    assert log_loss(proba, labels[2000:]) < base_rate_loss(labels[2000:]) - 0.1
+
+
+def test_boosted_trees_learn_an_interaction_that_stumps_and_logit_cannot():
+    features, rng = signal_data(1)
+    labels = labels_from(features[:, 0] * features[:, 1] + rng.normal(0, 1, len(features)))
+    train, test = slice(0, 2000), slice(2000, 3000)
+    losses = {}
+    for name, model in {"boosted": BoostedModel(rounds=60, depth=3), "gam": BoostedModel(rounds=60, depth=1),
+                        "logit": LogitModel()}.items():
+        model.fit(features[train], labels[train])
+        losses[name] = log_loss(model.predict_proba(features[test]), labels[test])
+    assert losses["boosted"] < losses["gam"] - 0.05 and losses["boosted"] < losses["logit"] - 0.05
+
+
+def test_gam_learns_a_signal_that_adds_up_over_two_facets():
+    features, rng = signal_data(2)
+    labels = labels_from(features[:, 0] ** 2 / 2 - 1 + 0.5 * features[:, 2] + rng.normal(0, 1, len(features)))
+    model = BoostedModel(rounds=80, depth=1)
+    model.fit(features[:2000], labels[:2000])
+    assert log_loss(model.predict_proba(features[2000:]), labels[2000:]) < base_rate_loss(labels[2000:]) - 0.03
+
+
+def test_new_models_are_deterministic_and_survive_a_missing_class():
+    features, _ = signal_data(3, 600)
+    labels = np.array([0, 2] * 300)
+    for make in (LogitModel, lambda: BoostedModel(rounds=5, depth=2, min_leaf=10)):
+        first, second = make(), make()
+        first.fit(features, labels)
+        second.fit(features, labels)
+        assert np.allclose(first.predict_proba(features[:20]), second.predict_proba(features[:20]))
+        assert first.predict_proba(features[:20]).shape == (20, 3)

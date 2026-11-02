@@ -30,11 +30,38 @@ def flat_series(ticker="AAA", length=300, last=100.0):
 # ------------------------------------------------------------ the score
 
 
-def test_four_parts_weigh_the_same_and_missing_parts_are_left_out():
-    score, used = final_score({"lstm": 4.0, "forest": 0.0, "nieuws": -2.0, "intuitie": 2.0})
-    assert score == 1.0 and used == ["lstm", "forest", "nieuws", "intuitie"]
-    score, used = final_score({"lstm": None, "forest": 1.0, "nieuws": 2.0, "intuitie": 3.0})
-    assert score == 2.0 and used == ["forest", "nieuws", "intuitie"]
+ALL = ("logistisch", "boosted", "gam", "forest", "nieuws", "intuitie")
+
+
+def everything(value):
+    """De score van alle vier de modellen uit het AI-lab."""
+    return {"forest": value, "logistisch": value, "boosted": value, "gam": value}
+
+
+def parts(**given):
+    return {name: given.get(name, 0.0) for name in ALL}
+
+
+def test_the_weights_are_three_models_at_10_percent_forest_and_news_25_and_intuition_20():
+    from functioning.constants import ADVICE_WEIGHTS
+    assert ADVICE_WEIGHTS == {"logistisch": 0.10, "boosted": 0.10, "gam": 0.10, "forest": 0.25, "nieuws": 0.25, "intuitie": 0.20}
+    assert abs(sum(ADVICE_WEIGHTS.values()) - 1) < 1e-9
+
+
+def test_each_part_counts_by_its_weight_in_the_score():
+    for name, weight in {"logistisch": 0.10, "boosted": 0.10, "gam": 0.10, "forest": 0.25, "nieuws": 0.25, "intuitie": 0.20}.items():
+        score, used = final_score(parts(**{name: 5.0}))
+        assert score == pytest.approx(5.0 * weight) and used == list(ALL)
+    assert final_score(parts(**{name: 4.0 for name in ALL}))[0] == pytest.approx(4.0)
+
+
+def test_a_missing_part_hands_its_weight_to_the_others_in_proportion():
+    score, used = final_score({"logistisch": None, "boosted": 2.0, "gam": 2.0, "forest": 2.0, "nieuws": 2.0, "intuitie": 2.0})
+    assert score == pytest.approx(2.0) and "logistisch" not in used
+    score, used = final_score({"logistisch": None, "boosted": None, "gam": None, "forest": 0.0, "nieuws": 5.0, "intuitie": 5.0})
+    assert score == pytest.approx((0.25 * 0 + 0.25 * 5 + 0.2 * 5) / 0.7) and used == ["forest", "nieuws", "intuitie"]
+    score, used = final_score({"lstm": 4.0, "forest": 0.0, "nieuws": -2.0, "intuitie": 2.0})   # een onbekend onderdeel telt niet mee
+    assert score == pytest.approx((0.25 * 0 + 0.25 * -2 + 0.2 * 2) / 0.7) and used == ["forest", "nieuws", "intuitie"]
     assert final_score({}) == (0.0, [])
 
 
@@ -57,7 +84,7 @@ def test_action_follows_score_and_status(score, invested, winner, worth, action)
 
 
 def test_a_small_position_is_not_sold_because_of_the_costs():
-    ai = {"lstm": -4.0, "tree": -4.0}
+    ai = everything(-4.0)
     big = build_row("AAA", [100.0] * 300, 1000.0, True, ai, -3.0, -3.0, [])
     small = build_row("AAA", [100.0] * 300, 100.0, True, ai, -3.0, -3.0, [])
     assert big.decision.action is Action.SELL and small.decision.action is Action.HOLD
@@ -66,7 +93,7 @@ def test_a_small_position_is_not_sold_because_of_the_costs():
 
 def test_a_stock_that_doubled_over_the_year_is_only_held():
     closes = [50.0] * 260 + [120.0] * 40
-    row = build_row("AAA", closes, 1000.0, True, {"lstm": -5.0, "tree": -5.0}, -5.0, -5.0, [])
+    row = build_row("AAA", closes, 1000.0, True, everything(-5.0), -5.0, -5.0, [])
     assert row.decision.action is Action.HOLD and "winnaar" in row.decision.reason
 
 
@@ -97,16 +124,16 @@ def test_latest_ai_run_reads_the_newest_file(tmp_path):
 
 
 def test_the_action_list_has_one_line_per_stock():
-    rows = [build_row("AAA", [100.0] * 300, 1000.0, True, {"lstm": -4.0, "tree": -4.0}, -3.0, -3.0, ["veel short"]),
+    rows = [build_row("AAA", [100.0] * 300, 1000.0, True, everything(-4.0), -3.0, -3.0, ["veel short"]),
             build_row("BBB", [100.0] * 300, 1000.0, False, None, 0.0, 0.0, [])]
     text = format_actions(rows, ACTION_LABELS, "komende 2,5 dag")
     assert "VERKOPEN" in text and "AAA" in text and "HOUDEN" in text and "BBB" in text
     table = format_table(rows, ACTION_LABELS)
-    assert "veel short" in table and "(2/4 onderdelen)" in table
+    assert "veel short" in table and "(2/6 onderdelen)" in table
 
 
 def test_save_advice_writes_json_for_the_page(tmp_path):
-    rows = [build_row("AAA", [100.0] * 300, 1000.0, True, {"lstm": -4.0, "tree": -4.0}, -3.0, -3.0, [])]
+    rows = [build_row("AAA", [100.0] * 300, 1000.0, True, everything(-4.0), -3.0, -3.0, [])]
     save_advice(TODAY, rows, ["diepte", "trend"], {"diepte": 0.5}, tmp_path / "advice.json")
     saved = json.loads((tmp_path / "advice.json").read_text())
     assert saved["rows"][0]["action"] == "sell" and saved["top_facets"] == ["diepte", "trend"]
@@ -144,7 +171,7 @@ def prepare_main(tmp_path, monkeypatch, run):
 
 def test_main_asks_scores_runs_the_lab_and_prints_the_actions(tmp_path, monkeypatch, capsys):
     run = {"result": {"top": ["diepte", "trend"], "weights": {"diepte": 1.0},
-                      "tickers": {"AAA": {"lstm": -4.0, "tree": -4.0}}}}
+                      "tickers": {"AAA": everything(-4.0)}}}
     prepare_main(tmp_path, monkeypatch, run)
     script.main()
     out = capsys.readouterr().out
