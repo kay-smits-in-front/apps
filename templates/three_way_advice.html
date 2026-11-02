@@ -2,7 +2,7 @@
 {% block title %}Three Way advies · kay.apps{% endblock %}
 {% block content %}
 <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
-<div class="subnav"><a href="{{ url_for('dashboard') }}">← Portaal</a><a href="{{ url_for('three_way_dashboard') }}">Uitgebreid dashboard →</a></div>
+<div class="subnav"><a href="{{ url_for('dashboard') }}">← Portaal</a><a href="{{ url_for('three_way_dashboard') }}">Uitgebreid dashboard →</a><a href="{{ url_for('three_way_models') }}">Modellen bekijken →</a></div>
 <p class="eyebrow">FINANCE · ADVIES</p><h1 class="page-title">Advies voor de komende dagen</h1>
 {% if not is_admin %}
 <section class="tool-panel"><p>Alleen de beheerder ziet het advies.</p></section>

@@ -631,6 +631,28 @@ def three_way_advice_run():
         return {"error": str(error)}, 500
 
 
+def model_overview(folder: Path | None = None) -> dict:
+    """De laatste run (scores van vandaag) en de laatste run met toetsing (nauwkeurigheid), uit de opgeslagen JSON."""
+    files = sorted((folder or Path(AI_LAB_PATH) / "runs").glob("*-three_way_advice.json"), reverse=True)
+    latest, tested = None, None
+    for path in files:
+        run = json.loads(path.read_text())
+        latest = latest or run
+        if run["result"].get("evaluation"):
+            tested = run
+            break
+    return {"latest": latest, "tested": tested}
+
+
+@app.route("/apps/three-way/models")
+@login_required
+def three_way_models():
+    user = approved_user()
+    usable = user.is_admin and not IS_PRODUCTION
+    return render_template("three_way_models.html", is_admin=user.is_admin, production=IS_PRODUCTION,
+                           overview=model_overview() if usable else None)
+
+
 @app.route("/apps/three-way/dashboard/advice")
 @login_required
 def three_way_dashboard_advice():

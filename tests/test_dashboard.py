@@ -631,3 +631,31 @@ def test_make_advice_computes_records_and_saves_for_the_users_positions(admin, m
     assert calls["quantities"] == {"AAA": 10.0} and calls["mode"] == "score" and calls["recorded"] == 1
     assert calls["saved"] == ["diepte", "trend"]
     assert answer["rows"][0]["action"] == "sell" and answer["stale"] is None and answer["failed"] == []
+
+
+def test_model_overview_takes_scores_from_the_newest_run_and_accuracy_from_the_newest_tested_run(tmp_path):
+    def save(name, evaluation, tag):
+        (tmp_path / f"{name}-three_way_advice.json").write_text(json.dumps(
+            {"time": name, "result": {"evaluation": evaluation, "tag": tag}}))
+    save("20261101-100000", {"lstm": {}}, "tested")
+    save("20261102-100000", None, "latest")
+    overview = app_module.model_overview(tmp_path)
+    assert overview["latest"]["result"]["tag"] == "latest" and overview["tested"]["result"]["tag"] == "tested"
+    assert app_module.model_overview(tmp_path / "leeg") == {"latest": None, "tested": None}
+
+
+def test_models_page_shows_accuracy_mse_weights_and_scores_for_the_admin(admin, monkeypatch):
+    local_only()
+    metrics = {"folds": 6, "rows": 100, "log_loss": 1.08, "base_loss": 1.09, "hit_rate": 0.52, "hit_days": 50,
+               "accuracy": 0.4, "base_accuracy": 0.36, "mse": 14.0, "base_mse": 16.0}
+    run = {"time": "2026-11-02T10:00:00", "result": {
+        "evaluation": {"lstm": metrics, "forest": metrics}, "weights": {"diepte": 0.6, "trend": 0.4}, "top": ["diepte", "trend"],
+        "tickers": {"AAA": {"lstm": -2.5, "tree": 1.0}, "BBB": {"lstm": None, "tree": 0.5}}}}
+    monkeypatch.setattr(app_module, "model_overview", lambda folder=None: {"latest": run, "tested": run})
+    page = admin.get("/apps/three-way/models").data.decode()
+    assert "Accuracy" in page and "MSE in scores" in page and "diepte" in page and "AAA" in page
+    assert page.count("beter dan de basis") >= 4 and "-2.5" in page
+
+
+def test_models_page_is_closed_to_non_admins(client):
+    assert b"Alleen de beheerder" in client.get("/apps/three-way/models").data

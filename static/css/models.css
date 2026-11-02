@@ -1,0 +1,15 @@
+.bar-track{fill:rgba(255,255,255,.08)}
+.bar-pos{fill:var(--accent)}
+.bar-neg{fill:#ff8c9a}
+.bar-top{fill:var(--accent)}
+.bar-rest{fill:#6f7a90}
+.bar-mid{stroke:rgba(255,255,255,.35);stroke-width:1}
+.model-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}
+.model-card{padding:18px;border:1px solid var(--line);border-radius:14px;background:#0f141d}
+.model-card h3{font:700 15px Manrope,sans-serif;margin:0 0 4px}
+.big-number{font:700 28px Manrope,sans-serif;margin:8px 0 2px}
+.bar-row{display:grid;grid-template-columns:110px minmax(0,1fr) 56px;align-items:center;gap:10px;font-size:12px;color:#c6ccda;margin:6px 0}
+.bar-row svg{width:100%;height:14px}
+.num{text-align:right;font-variant-numeric:tabular-nums}
+@media(max-width:700px){.model-grid{grid-template-columns:1fr}}
+.metric{margin:14px 0 4px}.metric-title{font-size:12px;color:#c6ccda;margin-bottom:2px}.metric-title span{margin-left:6px;font-weight:700}

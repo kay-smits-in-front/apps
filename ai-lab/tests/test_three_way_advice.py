@@ -13,7 +13,7 @@ from experiments.three_way_advice.run import CONFIG, run
 from lab.facets import FACETS, facet_row, facet_set
 from lab.features import WARMUP
 from lab.labels import direction_after
-from lab.metrics import base_rate_loss, hit_rate, log_loss
+from lab.metrics import accuracy, base_accuracy, base_rate_loss, base_score_mse, hit_rate, log_loss, score_mse
 from lab.models.forest import ForestModel
 from lab.models.lstm import LstmModel, init_params, loss_and_grads
 from lab.scores import direction_score, rsi_score, to_score, trend_score, volume_score
@@ -163,3 +163,14 @@ def test_advice_run_end_to_end_scores_every_stock(tmp_path):
         assert -5 <= row["lstm"] <= 5 and -5 <= row["tree"] <= 5 and set(row["facets"]) == set(three_way_facets())
     again = run(fake_prices(), config, "score", tmp_path / "lstm.npz")
     assert again["evaluation"] is None and again["tickers"]["AAA"]["lstm"] == result["tickers"]["AAA"]["lstm"]
+
+
+def test_accuracy_and_score_mse_against_their_baselines():
+    labels = np.array([0, 1, 1, 2])
+    right = np.array([[0.8, 0.1, 0.1], [0.1, 0.8, 0.1], [0.1, 0.8, 0.1], [0.1, 0.1, 0.8]])
+    assert accuracy(right, labels) == 1.0 and base_accuracy(labels) == 0.5
+    sure = np.array([[1.0, 0, 0], [0, 1.0, 0], [0, 1.0, 0], [0, 0, 1.0]])
+    assert score_mse(sure, labels, full_scale=1.0) == 0.0         # precies goed: -5, 0, 0, +5
+    assert base_score_mse(labels) == pytest.approx(12.5)          # altijd 0 geven: (25 + 25) / 4
+    wrong = sure[::-1]
+    assert score_mse(wrong, labels, full_scale=1.0) > base_score_mse(labels)

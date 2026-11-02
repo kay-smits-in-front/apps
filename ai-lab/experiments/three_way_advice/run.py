@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from adapters.three_way import DEFAULT_PRICES, build_direction_dataset, load_prices, three_way_facets, today_inputs
 from lab.data import Dataset
 from lab.evaluation import walk_forward
-from lab.metrics import base_rate_loss, hit_rate, log_loss
+from lab.metrics import accuracy, base_accuracy, base_rate_loss, base_score_mse, hit_rate, log_loss, score_mse
 from lab.models.forest import ForestModel
 from lab.models.lstm import LstmModel
 from lab.runs import RUNS_DIR, save_run
@@ -40,13 +40,15 @@ def make_lstm(config: dict):
 # ----------------------------------------------------------------- toets
 
 
-def judge(folds, classes: int = 3) -> dict:
+def judge(folds, full_scale: float, classes: int = 3) -> dict:
     """Samengevoegde uitslag over alle testperiodes, tegen de maatstaf 'ken alleen de basiskans'."""
     proba = np.vstack([f.proba for f in folds])
     labels = np.concatenate([f.test.labels for f in folds])
     rate, moved = hit_rate(proba, labels)
     return {"folds": len(folds), "rows": len(labels), "log_loss": round(log_loss(proba, labels), 4),
-            "base_loss": round(base_rate_loss(labels, classes), 4), "hit_rate": round(rate, 3), "hit_days": moved}
+            "base_loss": round(base_rate_loss(labels, classes), 4), "hit_rate": round(rate, 3), "hit_days": moved,
+            "accuracy": round(accuracy(proba, labels), 4), "base_accuracy": round(base_accuracy(labels, classes), 4),
+            "mse": round(score_mse(proba, labels, full_scale), 4), "base_mse": round(base_score_mse(labels), 4)}
 
 
 def evaluate(prices: dict, config: dict, facets: dict) -> dict:
@@ -56,7 +58,7 @@ def evaluate(prices: dict, config: dict, facets: dict) -> dict:
     args = (config["train_days"], config["test_days"], config["horizon_days"])
     forest_folds = walk_forward(flat, ForestModel, *args)
     lstm_folds = walk_forward(seq, lambda: make_lstm(config), *args)
-    return {"forest": judge(forest_folds), "lstm": judge(lstm_folds)}
+    return {"forest": judge(forest_folds, config["score_full_scale"]), "lstm": judge(lstm_folds, config["score_full_scale"])}
 
 
 # -------------------------------------------------------------- trainen
@@ -121,6 +123,8 @@ def print_evaluation(evaluation: dict) -> None:
         verdict = "beter dan basiskans" if r["log_loss"] < r["base_loss"] else "NIET beter dan basiskans"
         print(f"  {name:<7} verlies {r['log_loss']:.4f} tegen basiskans {r['base_loss']:.4f} ({verdict}); "
               f"juiste kant op {r['hit_rate']:.1%} van {r['hit_days']} bewegingsdagen, {r['folds']} testperiodes")
+        print(f"          accuracy {r['accuracy']:.1%} tegen {r['base_accuracy']:.1%} (altijd de vaakste klasse); "
+              f"MSE in scores {r['mse']:.2f} tegen {r['base_mse']:.2f} (altijd het gemiddelde)")
 
 
 if __name__ == "__main__":
