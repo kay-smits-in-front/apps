@@ -11,6 +11,8 @@ sys.path.insert(0, str(THREE_WAY))
 
 import advice as script  # noqa: E402
 import functioning.advice as adv  # noqa: E402
+from functioning.advice import log_advice  # noqa: E402
+from functioning.advice_log import AdviceLog, entry_of  # noqa: E402
 from functioning.advice import (
     build_row, decide, final_score, format_actions, format_table, latest_ai_run, save_advice, stale_note,
 )  # noqa: E402
@@ -164,6 +166,7 @@ def prepare_main(tmp_path, monkeypatch, run):
     monkeypatch.setattr(adv, "Ledger", TmpLedger)
     monkeypatch.setattr(script, "RuleStore", lambda: type("R", (), {"load": lambda self: (script.Rule(2, 5, 10, 8, 20, 40, 3, 2), None)})())
     monkeypatch.setattr(script, "save_advice", lambda day, rows, top, weights: save_advice(day, rows, top, weights, tmp_path / "advice.json"))
+    monkeypatch.setattr(script, "log_advice", lambda day, result, news, intuition: log_advice(day, result, news, intuition, AdviceLog(tmp_path / "advice_log.json")))
     monkeypatch.setattr(script, "date", type("D", (), {"today": staticmethod(lambda: TODAY), "fromisoformat": date.fromisoformat}))
     answers = iter(["-4", "-4"])
     monkeypatch.setattr("builtins.input", lambda prompt="": next(answers))
@@ -179,6 +182,8 @@ def test_main_asks_scores_runs_the_lab_and_prints_the_actions(tmp_path, monkeypa
     assert [t.action for t in Ledger(tmp_path / "ledger.json").load()] == ["sell"]
     assert Checks(tmp_path / "checks.json").load()[0].news == -4.0
     assert json.loads((tmp_path / "advice.json").read_text())["rows"][0]["action"] == "sell"
+    logged = AdviceLog(tmp_path / "advice_log.json").load()
+    assert [e["day"] for e in logged] == [TODAY.isoformat()] and logged[0]["rows"][0]["parts"]["gam"] == -4.0
 
 
 def test_main_gives_no_advice_and_records_nothing_when_the_ai_lab_fails(tmp_path, monkeypatch, capsys):
@@ -188,3 +193,34 @@ def test_main_gives_no_advice_and_records_nothing_when_the_ai_lab_fails(tmp_path
     assert "Geen advies" in str(stop.value) and "requirements.txt" in str(stop.value)
     assert "ACTIES" not in capsys.readouterr().out
     assert not (tmp_path / "ledger.json").exists() and not (tmp_path / "advice.json").exists()
+    assert not (tmp_path / "advice_log.json").exists()
+
+
+# ---------------------------------------------------------- the advice log
+
+
+def sample_rows(action_value=-4.0):
+    return [build_row("AAA", [100.0] * 300, 1000.0, True, everything(action_value), -3.0, -3.0, [])]
+
+
+def test_the_log_keeps_prices_position_parts_score_weights_and_action_of_every_run(tmp_path):
+    log = AdviceLog(tmp_path / "log.json")
+    log.add(entry_of(TODAY, sample_rows(), -3.0, -3.0, ["diepte", "trend"]))
+    entry = log.load()[0]
+    row = entry["rows"][0]
+    assert entry["day"] == TODAY.isoformat() and entry["news"] == -3.0 and entry["top_facets"] == ["diepte", "trend"]
+    assert entry["weights"]["forest"] == 0.25 and sum(entry["weights"].values()) == pytest.approx(1)
+    assert row["ticker"] == "AAA" and row["price"] == 100.0 and row["position_eur"] == 1000.0 and row["invested"] is True
+    assert set(row["parts"]) == {"forest", "logistisch", "boosted", "gam", "nieuws", "intuitie"}
+    assert row["action"] == "sell" and row["score"] < 0
+
+
+def test_running_twice_on_one_day_replaces_that_day_and_keeps_the_others_in_order(tmp_path):
+    log = AdviceLog(tmp_path / "log.json")
+    log.add(entry_of(TODAY, sample_rows(), 0.0, 0.0, []))
+    log.add(entry_of(TODAY - timedelta(days=2), sample_rows(), 0.0, 0.0, []))
+    log.add(entry_of(TODAY, sample_rows(-1.0), 1.0, 1.0, []))
+    days = [e["day"] for e in log.load()]
+    assert days == [(TODAY - timedelta(days=2)).isoformat(), TODAY.isoformat()]
+    assert log.load()[1]["news"] == 1.0
+    assert AdviceLog(tmp_path / "missing.json").load() == []

@@ -622,6 +622,7 @@ def test_make_advice_computes_records_and_saves_for_the_users_positions(admin, m
     monkeypatch.setattr(adv, "stocks_in_cash", lambda day: set())
     monkeypatch.setattr(adv, "record_advice", lambda day, rows, news, intuition, rule: calls.update(recorded=len(rows)) or [])
     monkeypatch.setattr(adv, "save_advice", lambda day, rows, top, weights: calls.update(saved=top))
+    monkeypatch.setattr(adv, "log_advice", lambda day, result, news, intuition: calls.update(logged=(news, intuition)))
     monkeypatch.setattr(storage, "RuleStore", lambda: type("R", (), {"load": lambda self: (LIVE, None)})())
     with app_module.app.app_context():
         user = app_module.db.session.scalar(app_module.select(app_module.User).where(app_module.User.email == "dash@example.com"))
@@ -629,7 +630,7 @@ def test_make_advice_computes_records_and_saves_for_the_users_positions(admin, m
         app_module.db.session.commit()
         answer = app_module.make_advice(user, -4.0, -4.0, "score")
     assert calls["quantities"] == {"AAA": 10.0} and calls["mode"] == "score" and calls["recorded"] == 1
-    assert calls["saved"] == ["diepte", "trend"]
+    assert calls["saved"] == ["diepte", "trend"] and calls["logged"] == (-4.0, -4.0)
     assert answer["rows"][0]["action"] == "sell" and answer["stale"] is None and answer["failed"] == []
 
 
@@ -660,3 +661,72 @@ def test_models_page_shows_accuracy_mse_weights_and_scores_for_the_admin(admin, 
 
 def test_models_page_is_closed_to_non_admins(client):
     assert b"Alleen de beheerder" in client.get("/apps/three-way/models").data
+
+
+# ------------------------------------------------------------ the track record
+
+
+def fake_track_data(monkeypatch, tmp_path):
+    import functioning.advice_log as advice_log
+    import functioning.prices as prices_module
+    import functioning.storage as storage
+
+    entry = {"day": "2026-11-02", "news": 0.0, "intuition": 0.0, "weights": {"forest": 0.25, "nieuws": 0.25},
+             "rows": [{"ticker": "AAA", "price": 100.0, "position_eur": 1000.0, "invested": True,
+                       "parts": {"forest": 2.0, "nieuws": -2.0}, "score": 0.0, "action": "hold", "reason": "x"}]}
+    log = type("L", (), {"load": lambda self: [entry]})
+    cache = type("P", (), {"load": lambda self: {"AAA": {"days": ["2026-11-02", "2026-11-03", "2026-11-04", "2026-11-05"],
+                                                          "closes": [100.0, 97.0, 94.0, 90.0]}}})
+
+    class TmpLedger(storage.Ledger):
+        def __init__(self):
+            super().__init__(tmp_path / "ledger.json")
+
+    class TmpChecks(storage.Checks):
+        def __init__(self):
+            super().__init__(tmp_path / "checks.json")
+
+    monkeypatch.setattr(advice_log, "AdviceLog", log)
+    monkeypatch.setattr(prices_module, "PriceCache", cache)
+    monkeypatch.setattr(storage, "Ledger", TmpLedger)
+    monkeypatch.setattr(storage, "Checks", TmpChecks)
+
+
+def test_track_record_judges_the_logged_runs_against_the_prices_that_followed(tmp_path, monkeypatch):
+    fake_track_data(monkeypatch, tmp_path)
+    record = app_module.track_record()
+    review = record["reviews"][0]
+    assert review["done"] and review["mean_result_pct"] == -10.0 and review["result_eur"] == -100.0
+    board = {part["name"]: part for part in record["scoreboard"]}
+    assert board["forest"]["right"] == 0 and board["nieuws"]["right"] == 1
+
+
+def test_models_page_shows_the_look_back_with_result_and_who_was_right(admin, monkeypatch, tmp_path):
+    local_only()
+    fake_track_data(monkeypatch, tmp_path)
+    metrics = {"folds": 6, "rows": 100, "log_loss": 1.08, "base_loss": 1.09, "hit_rate": 0.52, "hit_days": 50,
+               "accuracy": 0.4, "base_accuracy": 0.36, "mse": 14.0, "base_mse": 16.0}
+    run = {"time": "2026-11-02T10:00:00", "result": {"evaluation": {"forest": metrics}, "weights": {"diepte": 1.0}, "top": ["diepte"],
+                                                      "tickers": {"AAA": {"forest": 1.0}}}}
+    monkeypatch.setattr(app_module, "model_overview", lambda folder=None: {"latest": run, "tested": run})
+    page = admin.get("/apps/three-way/models").data.decode()
+    assert "Terugblik" in page and "afgerond na 3 dagen" in page and "-10.0%" in page and "HOUDEN" in page
+    assert "Welk onderdeel had het vaakst gelijk" in page and "nieuws" in page
+
+
+def test_models_page_shows_the_system_test_against_holding(admin, monkeypatch, tmp_path):
+    local_only()
+    fake_track_data(monkeypatch, tmp_path)
+    variant = {"folds": [{"first": "2024-01-01", "last": "2024-06-30", "trades": 3, "system_pct": 5.0, "hold_pct": 8.0}],
+               "wins": 0, "periods": 1, "trades": 3, "total_system_pct": 5.0, "total_hold_pct": 8.0, "check_days": 100,
+               "sell_signal_share": 0.02, "buy_signal_share": 0.01, "max_abs_score": 2.5}
+    system_run = {"time": "20261104-100000", "result": {"variants": {"zoals het advies draait": variant}, "note": "n"}}
+    metrics = {"folds": 6, "rows": 100, "log_loss": 1.08, "base_loss": 1.09, "hit_rate": 0.52, "hit_days": 50,
+               "accuracy": 0.4, "base_accuracy": 0.36, "mse": 14.0, "base_mse": 16.0}
+    run = {"time": "2026-11-02T10:00:00", "result": {"evaluation": {"forest": metrics}, "weights": {"diepte": 1.0}, "top": ["diepte"],
+                                                      "tickers": {"AAA": {"forest": 1.0}}}}
+    monkeypatch.setattr(app_module, "model_overview", lambda folder=None: {"latest": run, "tested": run})
+    monkeypatch.setattr(app_module, "latest_ai_run", lambda experiment, folder=None: system_run if experiment == "three_way_system" else None)
+    page = admin.get("/apps/three-way/models").data.decode()
+    assert "Systeemtest op het verleden" in page and "+5% <span" in page and "tegen +8% vasthouden" in page
+    assert "0 van 1 perioden beter dan vasthouden" in page and "2.0% een verkoopsignaal" in page

@@ -7,6 +7,7 @@ from functioning.advice import (
     compute_advice,
     format_actions,
     format_table,
+    log_advice,
     record_advice,
     save_advice,
     stocks_in_cash,
@@ -57,6 +58,7 @@ def main() -> None:
     else:
         record_confirmed(day, result.rows, news, intuition, rule, cash)
     save_advice(day, result.rows, result.top, result.weights)
+    log_advice(day, result, news, intuition)
     print(f"\n{format_actions(result.rows, ACTION_LABELS, ADVICE_HORIZON_TEXT)}")
 
 

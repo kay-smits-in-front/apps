@@ -596,7 +596,7 @@ def make_advice(user, news, intuition, mode):
     """Het advies voor de posities van de gebruiker, in het logboek gezet en bewaard. Gooit AdviceError."""
     three_way_import()
     from datetime import date
-    from functioning.advice import advice_dict, compute_advice, record_advice, save_advice, stocks_in_cash
+    from functioning.advice import advice_dict, compute_advice, log_advice, record_advice, save_advice, stocks_in_cash
     from functioning.storage import RuleStore
     day = date.today()
     quantities = {p.ticker: p.quantity for p in user_positions(user)}
@@ -604,6 +604,7 @@ def make_advice(user, news, intuition, mode):
         result = compute_advice(quantities, news, intuition, day, stocks_in_cash(day), mode)
         record_advice(day, result.rows, news, intuition, RuleStore().load()[0])
         save_advice(day, result.rows, result.top, result.weights)
+        log_advice(day, result, news, intuition)
     return advice_dict(day, result.rows, result.top, result.weights) | {"stale": result.stale, "failed": result.failed}
 
 
@@ -659,6 +660,21 @@ def model_names(source: dict | None) -> list[str]:
     return sorted(found, key=lambda name: list(MODEL_TITLES).index(name) if name in MODEL_TITLES else len(MODEL_TITLES))
 
 
+def track_record(limit: int = 8) -> dict:
+    """De beoordeling van het advies tot nu toe: de laatste runs en het scorebord per onderdeel."""
+    three_way_import()
+    from functioning.advice_log import AdviceLog
+    from functioning.constants import ADVICE_WEIGHTS
+    from functioning.prices import PriceCache
+    from functioning.review import entries_from_checks, merge_runs, part_scoreboard, review_all
+    from functioning.storage import Checks, Ledger
+    trades = Ledger().load()
+    entries = merge_runs(AdviceLog().load(), entries_from_checks(Checks().load(), lambda day: Ledger.cash_before(trades, day)))
+    reviews = review_all(entries, PriceCache().load())
+    board = sorted(part_scoreboard(reviews), key=lambda part: -ADVICE_WEIGHTS.get(part["name"], 0))
+    return {"reviews": reviews[:limit], "scoreboard": board, "runs": len(reviews)}
+
+
 @app.route("/apps/three-way/models")
 @login_required
 def three_way_models():
@@ -671,7 +687,8 @@ def three_way_models():
     from functioning.constants import ADVICE_WEIGHTS
     return render_template("three_way_models.html", is_admin=user.is_admin, production=IS_PRODUCTION, overview=overview,
                            titles=MODEL_TITLES, weights=ADVICE_WEIGHTS, tested_models=model_names(tested),
-                           today_models=model_names(today))
+                           today_models=model_names(today), track=track_record() if usable else None,
+                           system_test=latest_ai_run("three_way_system") if usable else None)
 
 
 @app.route("/apps/three-way/dashboard/advice")

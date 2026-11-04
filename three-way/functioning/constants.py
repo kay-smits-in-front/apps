@@ -167,6 +167,7 @@ HOLDOUT_WINDOWS = 6           # laatste perioden (ongeveer een jaar) die de zoek
 AI_LAB_DIR = Path(__file__).resolve().parent.parent.parent / "ai-lab"
 AI_EXPERIMENT = "three_way_advice"
 ADVICE_FILE = DATA_DIR / "advice.json"
+ADVICE_LOG_FILE = DATA_DIR / "advice_log.json"   # elke run volledig, om achteraf te beoordelen
 ADVICE_WEIGHTS = {            # de drie modellen samen 30%, de forest (beslisbomen over de facetten) en het nieuws elk 25%
     "logistisch": 0.10,
     "boosted": 0.10,
@@ -183,3 +184,5 @@ ADVICE_MOVE_PCT = 3.0         # de beweging waar het AI-advies op mikt, voor de 
 ADVICE_HORIZON_TEXT = "komende 2,5 dag"
 ADVICE_MAX_PRICE_AGE_DAYS = 4  # oudere koersen (meer dan een weekend) geven een waarschuwing
 AI_TIMEOUT_SECONDS = 1800  # toetsen en trainen mag tot een half uur duren
+REVIEW_HORIZON_DAYS = 3       # een advies wordt na zoveel handelsdagen beoordeeld
+REVIEW_NEUTRAL = 0.3          # een onderdeel met een score dichter bij 0 dan dit heeft geen mening

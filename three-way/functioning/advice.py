@@ -16,6 +16,7 @@ from functioning.constants import (
     PAPER_TRADING,
     PRICES_FILE,
 )
+from functioning.advice_log import AdviceLog, entry_of
 from functioning.imports import dataclass, date, json, os, subprocess, sys
 from functioning.players import PlayersCache, safely
 from functioning.prices import PriceCache, Series
@@ -61,6 +62,7 @@ class AdviceRow:
     used: list[str]
     decision: Decision
     labels: list[str]
+    position_eur: float = 0.0
 
 
 def build_row(ticker: str, closes: list[float], position_eur: float, invested: bool,
@@ -71,10 +73,10 @@ def build_row(ticker: str, closes: list[float], position_eur: float, invested: b
     score, used = final_score(parts)
     if len(used) < len(ADVICE_PARTS):
         reason = "geen AI-score (te weinig koershistorie): geen advies"
-        return AdviceRow(ticker, closes[-1], invested, parts, score, used, Decision(Action.HOLD, reason), labels)
+        return AdviceRow(ticker, closes[-1], invested, parts, score, used, Decision(Action.HOLD, reason), labels, position_eur)
     worth = worth_trading(position_eur, ADVICE_MOVE_PCT)
     decision = decide(score, invested, is_winner_at(closes, len(closes) - 1), worth)
-    return AdviceRow(ticker, closes[-1], invested, parts, score, used, decision, labels)
+    return AdviceRow(ticker, closes[-1], invested, parts, score, used, decision, labels, position_eur)
 
 
 def stale_note(last_days: dict[str, date], today: date) -> str | None:
@@ -170,6 +172,11 @@ def compute_advice(quantities: dict[str, float], news: float, intuition: float, 
                      player_labels([s.ticker for s in series], day))
     stale = stale_note({s.ticker: s.days[-1] for s in series}, day)
     return AdviceResult(day, rows, run["result"]["top"], run["result"]["weights"], stale, failed)
+
+
+def log_advice(day: date, result: AdviceResult, news: float, intuition: float, log: AdviceLog | None = None) -> None:
+    """Bewaar deze run volledig in het advies-log, voor de beoordeling achteraf."""
+    (log or AdviceLog()).add(entry_of(day, result.rows, news, intuition, result.top))
 
 
 def advice_trades(day: date, rows: list[AdviceRow]) -> list[Trade]:

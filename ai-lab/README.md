@@ -24,6 +24,11 @@ regressie (`logit.py`), boosted bomen in XGBoost-stijl en een GAM (`boosted.py`,
 diepte 1). Alles is eigen numpy-code: geen torch, scikit-learn of xgboost nodig. `train` print of ze beter zijn dan de
 basiskans (verlies, accuracy en MSE in scores); kijk daar eerst naar. De LSTM (`lab/models/lstm.py`) blijft beschikbaar
 maar zit niet meer in het advies.
+
+Systeemtest: `python experiments/three_way_system/run.py [pad/naar/prices.json]` speelt het hele advies (gewogen score,
+drempels, winnaars vasthouden, kostencontrole, alleen maandag en woensdag, handelen op de slotkoers erna, 3,95 per
+handeling) na op het verleden en vergelijkt met vasthouden (`lab/trading.py: run_policy`). Nieuws en intuïtie hebben
+geen historie en staan op 0 of zijn weggelaten. Het resultaat staat op de modellenpagina.
 Alleen het oudere experiment `three_way_turns` gebruikt scikit-learn: `python -m pip install scikit-learn`
 (let op: de naam is `scikit-learn`, niet `sklearn`).
 

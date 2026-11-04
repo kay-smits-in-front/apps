@@ -53,6 +53,19 @@ dat de zoekactie niet zag. Kijk daar naar, niet alleen naar de score op de zoekp
 | `advice.py` | Wat doe ik de komende 2,5 dag met elk aandeel? | ma, wo |
 | `walkforward.py` | Welke instelling van de regel werkte het beste de afgelopen 5 jaar? Slaat die op in `data/rule.json`. | maandelijks |
 | `backcasting.py` | Hoe had de regel de laatste 3 maanden gedaan, en wat is het maximum? | als je wilt kijken |
+| `review.py` | Hoe goed was elk eerder advies na 3 handelsdagen, en welk onderdeel had gelijk? | na elk advies |
+
+### Beoordeling van het advies
+Elke run van het advies wordt bewaard in `data/advice_log.json` (lokaal, niet in git): koers, positie, score per
+onderdeel (forest, logistisch, boosted, GAM, nieuws, intuïtie), totaalscore en actie. `python three-way/review.py`
+(of het paneel "Terugblik" op de modellenpagina) kijkt 3 handelsdagen na elke run:
+- Zit het systeem in het aandeel (houden terwijl belegd, of terugkopen), dan is winst goed en verlies fout.
+  Zit het erbuiten (verkopen, of in cash blijven), dan is verlies goed en winst fout.
+- Spijt is hoeveel beter de beste keuze achteraf was.
+- Per onderdeel: had het gelijk, en wat was de uitkomst als alleen dat onderdeel had beslist.
+- Een run is "lopend" tot 3 handelsdagen voorbij zijn. Het scorebord telt alleen afgeronde runs.
+De gewichten worden niet automatisch aangepast: na een paar runs is het scorebord toeval.
+Oudere runs zonder scores per onderdeel (alleen `checks.json`) worden beoordeeld op de actie alleen.
 
 De instelling wordt gekozen op het aandeel van periodes van twee maanden waarin de regel beter was dan
 vasthouden. Recente periodes tellen zwaarder: een periode telt half zo zwaar voor elke 6 periodes (ongeveer een jaar)

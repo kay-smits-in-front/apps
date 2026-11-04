@@ -112,3 +112,20 @@ def today_inputs(prices: dict[str, dict], facets: dict[str, Facet], length: int 
         sequence = window_ending_at(channels(matrix, closes), last, length) if length and last >= length - 1 else None
         found[ticker] = {"day": entry["days"][-1], "facets": matrix[last], "sequence": sequence}
     return found
+
+
+# ------------------------------------------------ het advies als geheel
+
+
+def system_action(parts: dict[str, float | None], closes: list[float], index: int, invested: bool,
+                  value_eur: float) -> tuple[str, float]:
+    """Wat het echte advies van three-way zou doen met deze scores: zelfde gewogen score, zelfde drempels,
+    winnaars vasthouden en de kostencontrole. Geeft ("sell", "buy" of "hold") en de totaalscore."""
+    if str(THREE_WAY) not in sys.path:
+        sys.path.insert(0, str(THREE_WAY))
+    from functioning.advice import decide, final_score
+    from functioning.constants import ADVICE_MOVE_PCT
+    from functioning.rule import is_winner_at, worth_trading
+    score, _ = final_score(parts)
+    decision = decide(score, invested, is_winner_at(closes, index), worth_trading(value_eur, ADVICE_MOVE_PCT))
+    return decision.action.value, score
