@@ -1,94 +1,60 @@
-# three-way
-Beheer aandelen.
+# Three Way
 
+Advies per aandeel voor de komende 2,5 handelsdag, plus het overzicht van je portefeuille. Alles gaat via één pagina
+in de app.
 
-# "All good things come in three and there are always three ways out"
-## Financial system
+## Gebruik
 
-### The never zero project. 
+1. Start de app vanuit de hoofdmap `apps`: `python app.py`
+2. Open http://127.0.0.1:5000, log in en klik op **Three Way**.
+3. Vul **Nieuws** en **Intuïtie** in (-5 slecht, +5 goed) en druk op **Bereken advies** (ongeveer een halve minuut).
+4. Voer de acties (VERKOPEN / KOPEN) zelf uit in je beleggingsapp. Pas daarna bij **Mijn aandelen** de aantallen aan.
 
-Predicting, stearing and enumariting information
-of financial instruments to maximize returns within a certian amount of time.
-The window is not focused on short term profit but the focus is increasing rendement 
-over a long time window by calling either , daily, weekly or monthly to. Buy, sell or hold.
-Based on three information streems news, financial indicators, and intuiton.
-#### news - daily, weekly monthly -- general, financial, socila media -- 40%
-#### financial indicators -- monthly, yearly, overall -- 40%
-#### intuition -- gut feeling, observations, financial situation -- 20% 
+Doe dit op maandag en woensdag, of elke dag als je wilt.
 
-### Gebruik
-**Maandag en woensdag, in de app:** start `python app.py` in de hoofdmap, open het portaal en klik op de kaart
-Three Way. Dat is de simpele pagina. Vul nieuws en intuïtie in (-5 tot +5), druk op **Bereken advies** en je ziet per
-aandeel de actie voor de komende 2,5 dag, met daaronder hoe het advies tot stand kwam. De knop ververst de koersen,
-draait de vier modellen, en zet de dag in het logboek (fictieve handel, `data/ledger.json`).
-Het uitgebreide dashboard staat achter de link rechtsboven op die pagina.
+Eerste keer op een nieuwe computer: `python -m pip install -r requirements.txt` in de hoofdmap.
+Daarna maak je eenmalig een beheerder aan met `flask --app app create-admin`.
+De melding "Could not find platform independent libraries" in PyCharm is onschuldig.
 
-Zonder terminal-app kan het ook in de terminal: `python three-way/advice.py` (vanuit de hoofdmap) of `python advice.py`
-(vanuit `three-way`). Zelfde uitkomst.
+## De pagina
 
-Werkt het AI-lab niet (bijvoorbeeld een pakket ontbreekt), dan geeft het advies **geen** acties, alleen de reden.
-Eerste keer op een nieuwe machine: `python -m pip install -r requirements.txt` (dat bevat numpy). De melding
-"Could not find platform independent libraries" in PyCharm is onschuldig.
-De modellen leren bij elke berekening opnieuw (ongeveer 25 seconden). De knop **Modellen opnieuw trainen en toetsen**
-duurt ongeveer een minuut en toetst ze ook op onbekende dagen. De uitkomst zie je op de pagina "Modellen bekijken".
+| Onderdeel | Wat het doet |
+|---|---|
+| 1. Advies | Per aandeel de score, de actie en de reden |
+| 2. Kandidaten | Je watchlist (aandelen die je interessant vindt), gescoord door het model. +1,5 of hoger is een kandidaat om naar te wisselen |
+| 3. Portefeuille | Waarde als je had vastgehouden, tegenover de uitgevoerde adviezen; per aandeel en per verkoop |
+| 4. Mijn aandelen | Toevoegen, aanpassen, weghalen (gelijk houden aan je beleggingsapp) |
+| 5. Waarom nu | Welke factoren vandaag positief of negatief zijn |
+| 6. Daghandel | Volume, gap, dagrange en RSI van de laatste dag |
+| 7. Wie zit erin | Institutionelen, insiders, short interest, analisten |
+| 8. Terugblik | Na 3 handelsdagen: had het advies gelijk, en welk onderdeel? |
 
-Zes onderdelen, elk van -5 tot +5, wegen mee (`ADVICE_WEIGHTS` in `constants.py`, samen 100%):
-de forest 25% (beslisbomen over alle koersfacetten; de zwaarste facetten tellen daarin het meest), jouw nieuws 25%,
-jouw intuïtie 20%, en drie modellen op dezelfde facetten elk 10%: een logistische regressie, boosted bomen en een GAM.
-De gewogen score is de score van een aandeel.
-Belegd en score tot -1,5: verkopen. In cash en score vanaf +1,5: terugkopen. Anders houden. Winnaars worden alleen
-vastgehouden en verkopen die de kosten niet dekken worden HOUDEN (`ADVICE_*` in `constants.py`). Heeft een aandeel nog
-geen AI-score (te weinig koershistorie), dan staat er HOUDEN zonder advies.
+## Hoe het advies werkt
 
-Eens per maand (of als main zegt dat de regel oud is): `python walkforward.py`. Dat zoekt de beste regel
-(`functioning/search.py`): per procentparameter van 0,5% tot 40% in stappen van 1%, stop na 5 stappen zonder
-verbetering, plus grove sprongen om een ander dal te testen. Daarna toetst het de gevonden regel op het laatste jaar
-dat de zoekactie niet zag. Kijk daar naar, niet alleen naar de score op de zoekperiode.
+- **Het model.** Een random forest (`functioning/forecast.py` en `forest.py`, alleen numpy) leert bij elke run opnieuw op
+  de koershistorie van je aandelen en je watchlist. Het kijkt naar zeven facetten: regel, trend, cumulatief, RSI,
+  volume, week en diepte. Het voorspelt of de koers binnen 3 handelsdagen minstens 3% daalt, stijgt of geen van beide.
+- **De score.** Elk onderdeel heeft een score van -5 tot +5. Ze wegen zo mee: forest 55%, nieuws 25%, intuïtie 20%
+  (`ADVICE_WEIGHTS` in `functioning/constants.py`).
+- **De actie.** Ben je belegd en is de score -1,5 of lager, dan verkopen. Zit je in cash en is de score +1,5 of hoger,
+  dan terugkopen. Anders houden.
+- **Uitzonderingen.** Winnaars (verdubbeld in een jaar) worden alleen vastgehouden. Een verkoop die de €3,95 kosten niet
+  dekt, wordt houden.
 
-`main.py` (elke ma, wo, vr) blijft bestaan als de uitgebreide check.
+**Waarom alleen de forest:** in een toets op 5 jaar koersen (november 2026) deed de forest alleen het beter dan een
+logistisch model, boosted bomen, een GAM, een LSTM en elk mengsel daarvan. Geen enkel model versloeg gewoon
+vasthouden. Gebruik je nieuws en intuïtie dus serieus, en kijk in de Terugblik of het advies je helpt.
 
-| Bestand | Vraag die het beantwoordt | Wanneer |
-|---|---|---|
-| `main.py` | Wat doe ik nu met elk aandeel? | ma, wo, vr |
-| `advice.py` | Wat doe ik de komende 2,5 dag met elk aandeel? | ma, wo |
-| `walkforward.py` | Welke instelling van de regel werkte het beste de afgelopen 5 jaar? Slaat die op in `data/rule.json`. | maandelijks |
-| `backcasting.py` | Hoe had de regel de laatste 3 maanden gedaan, en wat is het maximum? | als je wilt kijken |
-| `review.py` | Hoe goed was elk eerder advies na 3 handelsdagen, en welk onderdeel had gelijk? | na elk advies |
+## Bestanden
 
-### Beoordeling van het advies
-Elke run van het advies wordt bewaard in `data/advice_log.json` (lokaal, niet in git): koers, positie, score per
-onderdeel (forest, logistisch, boosted, GAM, nieuws, intuïtie), totaalscore en actie. `python three-way/review.py`
-(of het paneel "Terugblik" op de modellenpagina) kijkt 3 handelsdagen na elke run:
-- Zit het systeem in het aandeel (houden terwijl belegd, of terugkopen), dan is winst goed en verlies fout.
-  Zit het erbuiten (verkopen, of in cash blijven), dan is verlies goed en winst fout.
-- Spijt is hoeveel beter de beste keuze achteraf was.
-- Per onderdeel: had het gelijk, en wat was de uitkomst als alleen dat onderdeel had beslist.
-- Een run is "lopend" tot 3 handelsdagen voorbij zijn. Het scorebord telt alleen afgeronde runs.
-De gewichten worden niet automatisch aangepast: na een paar runs is het scorebord toeval.
-Oudere runs zonder scores per onderdeel (alleen `checks.json`) worden beoordeeld op de actie alleen.
-
-De instelling wordt gekozen op het aandeel van periodes van twee maanden waarin de regel beter was dan
-vasthouden. Recente periodes tellen zwaarder: een periode telt half zo zwaar voor elke 6 periodes (ongeveer een jaar)
-die hij verder terug ligt (`RECENCY_HALF_LIFE_WINDOWS` in `constants.py`).
-
-Alle drie gebruiken dezelfde regel (`rule.py`) met dezelfde instelling (`data/rule.json`),
-dus main toont zelf ook het bewijs van de regel. Nieuws en intuitie (en analyse) zitten alleen in main,
-want daar bestaat geen historie van. Tot er een maand checks in `data/checks.json` staan.
-
-### Bestanden
 | Bestand | Inhoud |
 |---|---|
-| `main.py`, `advice.py`, `walkforward.py`, `backcasting.py` | De scripts |
-| `search.py` | De zoekactie naar de beste regel en de hold-out toets |
-| `advice.py` (in `functioning`) | Score, actie en uitvoer van het advies |
-| `constants.py`, `imports.py` | Alle constanten, alle imports |
-| `market.py` | Yahoo, koersen, holdings |
-| `rule.py` | De regel en de beslissing |
-| `testing.py` | De rollende test van de regel |
-| `analysis.py` | Fundamentals, analistenverwachting, ingevoerde scores |
-| `storage.py` | Opgeslagen checks, cash-status, snapshots en regel |
-| `report.py` | Overzicht van main en portefeuilletabel |
+| `functioning/advice.py` | Score, actie, kandidaten en opslaan van het advies |
+| `functioning/forecast.py`, `forest.py` | Het voorspelmodel |
+| `functioning/overview.py` | De cijfers van de portefeuille |
+| `functioning/daytrade.py`, `whynow.py`, `players.py` | Daghandel, waarom nu, wie zit erin |
+| `functioning/review.py`, `advice_log.py` | De terugblik |
+| `functioning/prices.py`, `market.py` | Koersen van Yahoo, met een cache in `data/prices.json` |
+| `functioning/rule.py`, `storage.py`, `constants.py`, `imports.py` | Regel, opslag, instellingen, imports |
 
-## Integratie in kay.apps
-Deze map volgt de actuele code uit de aparte repository `kay-smits-in-front/three-way`.
-Persoonlijke portefeuille- en statusbestanden worden niet gekopieerd. Maak lokaal `data/holdings.json` aan op basis van `data/holdings.example.json`; deel het echte bestand niet en commit het niet.
+Persoonlijke bestanden in `data/` (holdings, watchlist, logboek) komen niet in Git.

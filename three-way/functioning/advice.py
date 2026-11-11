@@ -1,5 +1,5 @@
-"""Het advies van maandag en woensdag. Zes onderdelen, elk van -5 tot +5, wegen mee volgens ADVICE_WEIGHTS:
-drie modellen (logistisch, boosted bomen, GAM), de forest (beslisbomen over de facetten), het nieuws en de intuïtie.
+"""Het advies voor de komende dagen. Drie onderdelen, elk van -5 tot +5, wegen mee volgens ADVICE_WEIGHTS:
+de forest (voorspelmodel op de koers), jouw nieuws en jouw intuïtie.
 Het gewogen gemiddelde is de score van een aandeel, en de score met de status geeft de actie."""
 
 from functioning.constants import (
@@ -10,18 +10,15 @@ from functioning.constants import (
     ADVICE_PARTS,
     ADVICE_WEIGHTS,
     ADVICE_SELL_AT,
-    AI_EXPERIMENT,
-    AI_LAB_DIR,
-    AI_TIMEOUT_SECONDS,
     PAPER_TRADING,
-    PRICES_FILE,
 )
 from functioning.advice_log import AdviceLog, entry_of
-from functioning.imports import dataclass, date, json, os, subprocess, sys
+from functioning.forecast import forecast
+from functioning.imports import dataclass, date
 from functioning.players import PlayersCache, safely
 from functioning.prices import PriceCache, Series
 from functioning.rule import Action, Decision, Rule, is_winner_at, worth_trading
-from functioning.storage import Call, Cash, Check, Checks, Ledger, Trade, write_json
+from functioning.storage import Call, Cash, Check, Checks, Ledger, RuleStore, Trade, write_json
 
 # ------------------------------------------------------------------ score
 
@@ -89,30 +86,8 @@ def stale_note(last_days: dict[str, date], today: date) -> str | None:
             f"Controleer je internet en draai opnieuw voordat je handelt.")
 
 
-# ------------------------------------------------------------ the AI-Lab
-
-
-def latest_ai_run(folder=AI_LAB_DIR / "runs", experiment: str = AI_EXPERIMENT) -> dict | None:
-    """De nieuwste run van het AI-Lab als gewone JSON (geen AI-bibliotheken nodig)."""
-    files = sorted(folder.glob(f"*-{experiment}.json"))
-    return json.loads(files[-1].read_text()) if files else None
-
-
 class AdviceError(Exception):
     """Het advies kan niet gemaakt worden. De tekst zegt wat er mis is en wat je eraan doet."""
-
-
-def run_ai_lab(prices_file=PRICES_FILE, mode: str = "score") -> tuple[bool, str]:
-    """Draai het AI-Lab op de koersen. Geeft (gelukt, de laatste regels uitvoer of de fout)."""
-    script = AI_LAB_DIR / "experiments" / AI_EXPERIMENT / "run.py"
-    done = subprocess.run([sys.executable, str(script), mode, str(prices_file)], cwd=AI_LAB_DIR,
-                          capture_output=True, text=True, encoding="utf-8", errors="replace",
-                          env={**os.environ, "PYTHONIOENCODING": "utf-8"}, timeout=AI_TIMEOUT_SECONDS)
-    return done.returncode == 0, (done.stdout if done.returncode == 0 else done.stderr)[-600:]
-
-
-def ai_by_ticker(run: dict | None) -> dict[str, dict]:
-    return run["result"]["tickers"] if run else {}
 
 
 # ---------------------------------------------------------------- compute
@@ -126,6 +101,7 @@ class AdviceResult:
     weights: dict[str, float]
     stale: str | None
     failed: list[str]
+    candidates: list[dict]
 
 
 def stocks_in_cash(day: date, ledger: Ledger | None = None) -> set[str]:
@@ -148,30 +124,26 @@ def make_rows(series: list[Series], quantities: dict[str, float], cash: set[str]
     ]
 
 
-def ai_run_or_error(mode: str) -> dict:
-    """Draai het AI-Lab en geef de uitkomst. Lukt dat niet, dan is er geen advies."""
-    try:
-        ok, message = run_ai_lab(mode=mode)
-    except subprocess.TimeoutExpired:
-        raise AdviceError("Het AI-lab duurde te lang en is gestopt. Draai het opnieuw.") from None
-    run = latest_ai_run() if ok else None
-    if run is None:
-        raise AdviceError("Het AI-lab kon niet draaien, dus er is geen advies. Installeer de pakketten met "
-                          f"'pip install -r requirements.txt' en probeer opnieuw.\n{message}")
-    return run
+def candidates(scores: dict[str, float], held: dict[str, float]) -> list[dict]:
+    """Aandelen van de watchlist die je niet hebt, beste verwachting eerst."""
+    found = [{"ticker": t, "score": score} for t, score in scores.items() if t not in held]
+    return sorted(found, key=lambda c: -c["score"])
 
 
 def compute_advice(quantities: dict[str, float], news: float, intuition: float, day: date,
-                   cash: set[str], mode: str = "score") -> AdviceResult:
-    """Het hele advies, zonder vragen of print. Verversen van koersen, AI-lab, vier onderdelen, acties."""
-    series, failed = PriceCache().series(list(quantities), day)
-    if not series:
+                   cash: set[str], watchlist: list[str] = ()) -> AdviceResult:
+    """Het hele advies: koersen verversen, de forest leren en scoren, onderdelen wegen, acties en kandidaten."""
+    tickers = list(quantities) + [t for t in watchlist if t not in quantities]
+    series, failed = PriceCache().series(tickers, day)
+    held = [s for s in series if s.ticker in quantities]
+    if not held:
         raise AdviceError("Geen koersen beschikbaar. Controleer je internetverbinding.")
-    run = ai_run_or_error(mode)
-    rows = make_rows(series, quantities, cash, ai_by_ticker(run), news, intuition,
-                     player_labels([s.ticker for s in series], day))
-    stale = stale_note({s.ticker: s.days[-1] for s in series}, day)
-    return AdviceResult(day, rows, run["result"]["top"], run["result"]["weights"], stale, failed)
+    found = forecast(series, RuleStore().load()[0])
+    ai = {ticker: {"forest": score} for ticker, score in found["scores"].items()}
+    rows = make_rows(held, quantities, cash, ai, news, intuition, player_labels([s.ticker for s in held], day))
+    stale = stale_note({s.ticker: s.days[-1] for s in held}, day)
+    return AdviceResult(day, rows, found["top"], found["weights"], stale, failed,
+                        candidates(found["scores"], quantities))
 
 
 def log_advice(day: date, result: AdviceResult, news: float, intuition: float, log: AdviceLog | None = None) -> None:
@@ -194,51 +166,20 @@ def record_advice(day: date, rows: list[AdviceRow], news: float, intuition: floa
     return trades
 
 
-# ------------------------------------------------------------------ print
-
-
-def cell(value: float | None, width: int) -> str:
-    return f"{'-' if value is None else format(value, '+.1f'):>{width}}"
-
-
-def format_header() -> str:
-    return (f"{'Ticker':<10}{'Status':<8}{'Forest':>8}{'Logit':>7}{'Boost':>7}{'GAM':>6}{'Nieuws':>8}{'Intuitie':>10}{'Score':>8}  "
-            f"{'Actie':<10}Reden")
-
-
-def format_row(row: AdviceRow, labels: dict[str, str]) -> str:
-    p = row.parts
-    partial = f" ({len(row.used)}/{len(ADVICE_PARTS)} onderdelen)" if len(row.used) < len(ADVICE_PARTS) else ""
-    note = f"{partial}  [{', '.join(row.labels)}]" if row.labels else partial
-    return (f"{row.ticker:<10}{'belegd' if row.invested else 'cash':<8}{cell(p['forest'], 8)}{cell(p['logistisch'], 7)}"
-            f"{cell(p['boosted'], 7)}{cell(p['gam'], 6)}{cell(p['nieuws'], 8)}{cell(p['intuitie'], 10)}{cell(row.score, 8)}  "
-            f"{labels[row.decision.action.value]:<10}{row.decision.reason}{note}")
-
-
-def format_table(rows: list[AdviceRow], labels: dict[str, str]) -> str:
-    header = format_header()
-    return "\n".join([header, "-" * len(header)] + [format_row(r, labels) for r in rows])
-
-
-def format_actions(rows: list[AdviceRow], labels: dict[str, str], horizon: str) -> str:
-    """Het lijstje waar het om draait: alleen aandeel en actie."""
-    lines = [f"ACTIES voor de {horizon}:"]
-    lines += [f"  {labels[r.decision.action.value]:<10}{r.ticker}" for r in rows]
-    return "\n".join(lines)
-
-
 # ------------------------------------------------------------------- save
 
 
-def advice_dict(day: date, rows: list[AdviceRow], top: list[str], weights: dict[str, float]) -> dict:
-    """Het advies als gewone gegevens, voor de simpele pagina en voor data/advice.json."""
+def advice_dict(result: AdviceResult) -> dict:
+    """Het advies als gewone gegevens, voor de pagina en voor data/advice.json."""
     return {
-        "day": day.isoformat(), "top_facets": top, "facet_weights": weights,
+        "day": result.day.isoformat(), "top_facets": result.top, "facet_weights": result.weights,
         "rows": [{"ticker": r.ticker, "invested": r.invested, "parts": r.parts, "score": round(r.score, 2),
-                  "action": r.decision.action.value, "reason": r.decision.reason, "labels": r.labels} for r in rows],
+                  "action": r.decision.action.value, "reason": r.decision.reason, "labels": r.labels}
+                 for r in result.rows],
+        "candidates": result.candidates, "stale": result.stale, "failed": result.failed,
     }
 
 
-def save_advice(day: date, rows: list[AdviceRow], top: list[str], weights: dict[str, float], path=ADVICE_FILE) -> None:
-    """De laatste uitkomst voor de simpele pagina in het portaal."""
-    write_json(path, advice_dict(day, rows, top, weights))
+def save_advice(result: AdviceResult, path=ADVICE_FILE) -> None:
+    """De laatste uitkomst, zodat de pagina hem bij openen meteen toont."""
+    write_json(path, advice_dict(result))

@@ -70,4 +70,5 @@ Dit vermindert risico's maar garandeert geen absolute veiligheid. Voer tests, de
 
 ## Three Way
 
-Three Way blijft volledig apart. Dit portaal bevat geen beleggingsdata en de koppeling is nog niet geïmplementeerd. Voordat anderen Three Way mogen gebruiken, moet de beleggingsapp iedere databasequery server-side beperken tot de eigenaar van de data. Alleen een verborgen link of frontendfilter is geen toegangsbeveiliging.
+Beleggingsadvies en portefeuille, lokaal: `python app.py`, inloggen, kaart **Three Way**. Zie `three-way/README.md`.
+Three Way staat op Render uit tot er private, blijvende opslag is: het werkt alleen lokaal en alleen voor de beheerder.

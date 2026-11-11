@@ -9,3 +9,5 @@ data/sentiment.json
 data/advice.json
 data/players.json
 data/advice_log.json
+data/watchlist.json
+data/ledger.json

@@ -5,10 +5,9 @@ import threading
 import smtplib
 import urllib.parse
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 from functools import wraps
-from pathlib import Path
 from getpass import getpass
 
 from dotenv import load_dotenv
@@ -90,7 +89,6 @@ login_manager.login_message = "Log eerst in om deze pagina te bekijken."
 # scripts in a short-lived web dyno or exposing personal data to a shared service.
 THREE_WAY_PATH = os.path.abspath(os.getenv("THREE_WAY_PATH", os.path.join(os.path.dirname(__file__), "three-way")))
 THREE_WAY_LOCK = threading.Lock()
-AI_LAB_PATH = os.path.abspath(os.getenv("AI_LAB_PATH", os.path.join(os.path.dirname(__file__), "ai-lab")))
 
 
 class User(UserMixin, db.Model):
@@ -103,23 +101,13 @@ class User(UserMixin, db.Model):
 
 
 class Position(db.Model):
-    """A stock one user holds, with the group (rule) it follows."""
+    """A stock one user holds."""
     __table_args__ = (db.UniqueConstraint("user_id", "ticker", name="one_position_per_ticker"),)
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
     ticker = db.Column(db.String(20), nullable=False)
     quantity = db.Column(db.Float, nullable=False)
     cost_eur = db.Column(db.Float, nullable=False, default=0.0)
-    group = db.Column(db.String(20), nullable=True)
-
-
-class GroupSetting(db.Model):
-    """The settings (JSON) one user chose for one group."""
-    __table_args__ = (db.UniqueConstraint("user_id", "group", name="one_setting_per_group"),)
-    id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False, index=True)
-    group = db.Column(db.String(20), nullable=False)
-    data = db.Column(db.Text, nullable=False)
 
 
 class Seeded(db.Model):
@@ -300,12 +288,10 @@ def dashboard():
         flash("Je account heeft nog geen toegang.", "error")
         return redirect(url_for("login"))
     apps = [
-        {"name": "Three Way", "description": "Beleggingsanalyse en portefeuille-inzichten.",
-         "status": "Lokaal", "icon": "↗", "url": url_for("three_way_advice")},
+        {"name": "Three Way", "description": "Advies per aandeel voor de komende dagen, en je portefeuille.",
+         "status": "Lokaal", "icon": "↗", "url": url_for("three_way")},
         {"name": "SHIELD", "description": "Basisdashboard voor de DJI Tello: verkenning, mapping en AI-interactie.",
          "status": "Opzet", "icon": "⌁", "url": url_for("shield_dashboard")},
-        {"name": "AI-LAB", "description": "Modellen vanaf nul bouwen en streng toetsen. Three Way is het eerste onderwerp.",
-         "status": "Lokaal", "icon": "✦", "url": url_for("ai_lab")},
         {"name": "Thinkwave", "description": "Open de Thinkwave-ervaring vanuit je persoonlijke app-portaal.",
          "status": "PlayCanvas", "icon": "✳", "url": url_for("thinkwave")},
     ]
@@ -326,19 +312,6 @@ def shield_tests():
     return render_template("shield_tests.html")
 
 
-@app.route("/apps/three-way")
-@login_required
-def three_way():
-    return redirect(url_for("three_way_dashboard"))
-
-
-RULE_FIELDS = {
-    "lookback_days": (1, 20, int), "up_pct": (0.5, 200, float), "down_pct": (0.5, 100, float),
-    "stop_pct": (0.5, 100, float), "floor_pct": (0.5, 100, float), "regime_pct": (5, 300, float),
-    "turn_pct": (0.5, 50, float), "review_days": (1, 20, int),
-}
-
-
 def read_number(raw, low, high, kind):
     value = kind(str(raw).replace(",", "."))
     if not low <= value <= high:
@@ -346,49 +319,15 @@ def read_number(raw, low, high, kind):
     return value
 
 
-def read_score(raw):
-    """A score from -5 to +5, or None when the factor is switched off."""
-    if raw in (None, "", "off"):
-        return None
-    return read_number(raw, -5, 5, float)
-
-
-def scenario_from_args(args, defaults, saved_plan=None):
-    """The scenario of the request. Missing fields keep the default setting."""
-    from functioning.dashboard import Scenario
-    from functioning.rule import Rule
-    values = dict(vars(defaults.rule))
-    for field, (low, high, kind) in RULE_FIELDS.items():
-        if args.get(field):
-            values[field] = read_number(args[field], low, high, kind)
-    news = read_score(args["news"]) if "news" in args else defaults.news
-    intuition = read_score(args["intuition"]) if "intuition" in args else defaults.intuition
-    return Scenario(Rule(**values), news, intuition, plan_from_args(args) or saved_plan)
-
-
-def plan_from_args(args):
-    """The plan per group, when the request asks for it (plan=<json>). Otherwise None."""
-    import json
-    from functioning.groups import plan_from_json
-    raw = args.get("plan")
-    if not raw:
-        return None
-    if len(raw) > 4000:
-        raise ValueError("plan te groot")
-    parsed = json.loads(raw)
-    if not isinstance(parsed, dict):
-        raise ValueError("plan ongeldig")
-    return plan_from_json(parsed)
-
-
 def three_way_import():
-    """Make the bundled Three Way code importable for the dashboard."""
+    """Make the bundled Three Way code importable."""
     import sys
     if THREE_WAY_PATH not in sys.path:
         sys.path.insert(0, THREE_WAY_PATH)
 
 
 MAX_POSITIONS = 60
+MAX_WATCHLIST = 40
 TICKER_PATTERN = re.compile(r"^[A-Z0-9][A-Z0-9.\-=^]{0,14}$")
 
 
@@ -408,17 +347,29 @@ def approved_user():
     return current_user
 
 
+def usable_by(user):
+    """Three Way works only for the admin, and only locally (no persistent private storage on Render yet)."""
+    return user.is_admin and not IS_PRODUCTION
+
+
+def three_way_user():
+    user = approved_user()
+    if not usable_by(user):
+        abort(403)
+    three_way_import()
+    return user
+
+
 def import_holdings_file(user):
-    """First visit of the admin: take over data/holdings.json, with the starting groups."""
+    """First visit of the admin: take over data/holdings.json."""
     if not user.is_admin or db.session.get(Seeded, user.id):
         return
     db.session.add(Seeded(user_id=user.id))
     three_way_import()
-    from functioning.constants import DEFAULT_GROUPS
     from functioning.market import Holdings
     for entry in Holdings().entries():
         db.session.add(Position(user_id=user.id, ticker=entry["ticker"], quantity=float(entry["quantity"]),
-                                cost_eur=float(entry.get("cost_eur", 0)), group=DEFAULT_GROUPS.get(entry["ticker"])))
+                                cost_eur=float(entry.get("cost_eur", 0))))
     db.session.commit()
 
 
@@ -427,22 +378,16 @@ def user_positions(user):
     return db.session.scalars(select(Position).where(Position.user_id == user.id).order_by(Position.ticker)).all()
 
 
-def user_plan(user):
-    """Groups of the user's stocks plus the settings the user saved (defaults otherwise)."""
-    from functioning.groups import plan_from_json
-    saved = {row.group: json.loads(row.data)
-             for row in db.session.scalars(select(GroupSetting).where(GroupSetting.user_id == user.id))}
-    groups = {p.ticker: p.group for p in user_positions(user) if p.group}
-    return plan_from_json({"groups": groups, "settings": saved})
+def user_quantities(user):
+    return {p.ticker: p.quantity for p in user_positions(user)}
 
 
 def position_json(position):
-    return {"ticker": position.ticker, "quantity": position.quantity, "cost_eur": position.cost_eur, "group": position.group}
+    return {"ticker": position.ticker, "quantity": position.quantity, "cost_eur": position.cost_eur}
 
 
 def verify_ticker(ticker):
     """True if Yahoo has prices for the ticker. Fetches (and caches) the history."""
-    three_way_import()
     from functioning.prices import PriceCache
     series, _ = PriceCache().series([ticker])
     return bool(series)
@@ -455,214 +400,30 @@ def yahoo_search(query):
              "exchange": q.get("exchDisp", ""), "type": q.get("quoteType", "")} for q in quotes if q.get("symbol")]
 
 
-def read_position_payload(body):
-    ticker = str(body.get("ticker", "")).strip().upper()
+def read_ticker(raw):
+    ticker = str(raw or "").strip().upper()
     if not TICKER_PATTERN.match(ticker):
         raise ValueError("Ongeldige ticker.")
+    return ticker
+
+
+def read_position_payload(body):
+    ticker = read_ticker(body.get("ticker"))
     quantity = read_number(body.get("quantity"), 1e-9, 1e9, float)
     cost = read_number(body.get("cost_eur", 0) or 0, 0, 1e9, float)
     return ticker, quantity, cost
 
 
-@app.route("/apps/three-way/dashboard")
-@login_required
-def three_way_dashboard():
-    user = approved_user()
-    if IS_PRODUCTION:
-        return render_template("three_way_dashboard.html", defaults=None, disabled=True)
-    three_way_import()
-    from functioning.constants import GROUP_LABELS
-    scenario = scenario_defaults(user)
-    plan = user_plan(user)
-    defaults = {**vars(scenario.rule), "news": scenario.news, "intuition": scenario.intuition,
-                "plan": {"groups": plan.groups, "settings": plan.settings, "labels": GROUP_LABELS}}
-    return render_template("three_way_dashboard.html", defaults=defaults, disabled=False)
-
-
-def scenario_defaults(user):
-    """Admin: the saved rule and latest scores. Others: the live start rule, no scores."""
-    from functioning.dashboard import Scenario, default_scenario
-    from functioning.rule import LIVE
-    return default_scenario() if user.is_admin else Scenario(LIVE)
-
-
-@app.route("/apps/three-way/dashboard/data")
-@login_required
-@limiter.limit("1200 per hour", override_defaults=True)
-def three_way_dashboard_data():
-    user = approved_user()
-    if IS_PRODUCTION:
-        return {"error": "Het dashboard is op Render uitgeschakeld totdat persistente opslag is ingericht."}, 503
-    three_way_import()
-    from functioning.dashboard import dashboard_data
-    from functioning.storage import Ledger
-    try:
-        scenario = scenario_from_args(request.args, scenario_defaults(user), user_plan(user))
-        window = int(read_number(request.args.get("days", "180"), 30, 1825, float))
-    except (ValueError, TypeError, AttributeError):
-        return {"error": "Ongeldige instelling."}, 400
-    holdings = UserHoldings({p.ticker: p.quantity for p in user_positions(user)})
-    ledger = Ledger() if user.is_admin else Ledger(Path(app.instance_path) / "no-trades.json")
-    with THREE_WAY_LOCK:
-        return dashboard_data(scenario, window, holdings=holdings, ledger=ledger)
-
-
-@app.route("/apps/three-way/dashboard/research")
-@login_required
-@limiter.limit("1200 per hour", override_defaults=True)
-def three_way_dashboard_research():
-    user = approved_user()
-    if IS_PRODUCTION:
-        return {"error": "Het dashboard is op Render uitgeschakeld totdat persistente opslag is ingericht."}, 503
-    three_way_import()
-    from functioning.prices import PriceCache
-    from functioning.research import research_data
-    try:
-        scenario = scenario_from_args(request.args, scenario_defaults(user), user_plan(user))
-    except (ValueError, TypeError, AttributeError):
-        return {"error": "Ongeldige instelling."}, 400
-    quantities = {p.ticker: p.quantity for p in user_positions(user)}
-    with THREE_WAY_LOCK:
-        series, failed = PriceCache().series(list(quantities))
-        return research_data(series, scenario, quantities) | {"failed": failed}
-
-
-def latest_ai_run(experiment: str, folder: Path | None = None) -> dict | None:
-    """The newest saved run of an AI-Lab experiment (plain JSON, no AI libraries needed here)."""
-    import json
-    files = sorted((folder or Path(AI_LAB_PATH) / "runs").glob(f"*-{experiment}.json"))
-    return json.loads(files[-1].read_text()) if files else None
-
-
-def ai_runs(folder: Path | None = None) -> list[dict]:
-    """All saved AI-Lab runs, newest first, with the headline of each."""
-    import json
-    rows = []
-    for path in sorted((folder or Path(AI_LAB_PATH) / "runs").glob("*.json"), reverse=True):
-        run = json.loads(path.read_text())
-        result = run.get("result", {})
-        rows.append({"experiment": run.get("experiment", path.stem), "time": run.get("time", ""),
-                     "headline": (f"model {result['rule_pct']:+.1f}% tegen vasthouden {result['hold_pct']:+.1f}%, "
-                                  f"{result['wins']}/{result['total_periods']} perioden gewonnen")
-                     if "rule_pct" in result else ""})
-    return rows
-
-
-@app.route("/apps/ai-lab")
-@login_required
-def ai_lab():
-    user = approved_user()
-    return render_template("ai_lab.html", runs=ai_runs() if user.is_admin else [], is_admin=user.is_admin)
-
-
-@app.route("/apps/three-way/dashboard/ai")
-@login_required
-def three_way_dashboard_ai():
-    user = approved_user()
-    if not user.is_admin:
-        return {"run": None}
-    run = latest_ai_run("three_way_turns")
-    if run:
-        run["result"].pop("periods", None)
-    return {"run": run}
-
-
-def latest_advice(path: Path | None = None) -> dict | None:
-    """De laatste uitkomst van advice.py (zie three-way), of None als die er nog niet is."""
-    import json
-    path = path or Path(THREE_WAY_PATH) / "data" / "advice.json"
-    return json.loads(path.read_text()) if path.exists() else None
-
-
-def advice_form_defaults():
-    """Nieuws en intuïtie van de vorige check, als beginwaarde voor het formulier."""
-    three_way_import()
+def last_scores():
+    """News and intuition of the latest check, as the start values of the form."""
     from datetime import date
     from functioning.storage import Checks
-    previous = Checks.previous(Checks().load(), date.today())
+    previous = Checks.previous(Checks().load(), date.today() + timedelta(days=1))
     return {"news": previous.news if previous else 0, "intuition": previous.intuition if previous else 0}
 
 
-@app.route("/apps/three-way/advice")
-@login_required
-def three_way_advice():
-    user = approved_user()
-    usable = user.is_admin and not IS_PRODUCTION
-    return render_template("three_way_advice.html", is_admin=user.is_admin, production=IS_PRODUCTION,
-                           defaults=advice_form_defaults() if usable else None)
-
-
-def make_advice(user, news, intuition, mode):
-    """Het advies voor de posities van de gebruiker, in het logboek gezet en bewaard. Gooit AdviceError."""
-    three_way_import()
-    from datetime import date
-    from functioning.advice import advice_dict, compute_advice, log_advice, record_advice, save_advice, stocks_in_cash
-    from functioning.storage import RuleStore
-    day = date.today()
-    quantities = {p.ticker: p.quantity for p in user_positions(user)}
-    with THREE_WAY_LOCK:
-        result = compute_advice(quantities, news, intuition, day, stocks_in_cash(day), mode)
-        record_advice(day, result.rows, news, intuition, RuleStore().load()[0])
-        save_advice(day, result.rows, result.top, result.weights)
-        log_advice(day, result, news, intuition)
-    return advice_dict(day, result.rows, result.top, result.weights) | {"stale": result.stale, "failed": result.failed}
-
-
-@app.route("/apps/three-way/advice/run", methods=["POST"])
-@login_required
-@limiter.limit("30 per hour", override_defaults=True)
-def three_way_advice_run():
-    user = approved_user()
-    if IS_PRODUCTION:
-        return {"error": "Het advies is op Render uitgeschakeld totdat persistente opslag is ingericht."}, 503
-    if not user.is_admin:
-        abort(403)
-    body = request.get_json(silent=True) or {}
-    try:
-        news = read_number(body.get("news", 0), -5, 5, float)
-        intuition = read_number(body.get("intuition", 0), -5, 5, float)
-    except (ValueError, TypeError):
-        return {"error": "Nieuws en intuïtie moeten tussen -5 en +5 liggen."}, 400
-    mode = "train" if body.get("retrain") is True else "score"
-    three_way_import()
-    from functioning.advice import AdviceError
-    try:
-        return make_advice(user, news, intuition, mode)
-    except AdviceError as error:
-        return {"error": str(error)}, 500
-
-
-def model_overview(folder: Path | None = None) -> dict:
-    """De laatste run (scores van vandaag) en de laatste run met toetsing (nauwkeurigheid), uit de opgeslagen JSON."""
-    files = sorted((folder or Path(AI_LAB_PATH) / "runs").glob("*-three_way_advice.json"), reverse=True)
-    latest, tested = None, None
-    for path in files:
-        run = json.loads(path.read_text())
-        latest = latest or run
-        if run["result"].get("evaluation"):
-            tested = run
-            break
-    return {"latest": latest, "tested": tested}
-
-
-MODEL_TITLES = {
-    "forest": "Forest (beslisbomen over alle facetten)",
-    "logistisch": "Logistische regressie",
-    "boosted": "Boosted bomen (XGBoost-stijl)",
-    "gam": "GAM (additief, stompjes)",
-    "lstm": "LSTM (oudere run)",
-}
-
-
-def model_names(source: dict | None) -> list[str]:
-    """De modellen in een lijst resultaten of scores, in vaste volgorde (onbekende achteraan)."""
-    found = [name for name in (source or {}) if name not in ("day", "facets")]
-    return sorted(found, key=lambda name: list(MODEL_TITLES).index(name) if name in MODEL_TITLES else len(MODEL_TITLES))
-
-
-def track_record(limit: int = 8) -> dict:
+def track_record(limit: int = 6) -> dict:
     """De beoordeling van het advies tot nu toe: de laatste runs en het scorebord per onderdeel."""
-    three_way_import()
     from functioning.advice_log import AdviceLog
     from functioning.constants import ADVICE_WEIGHTS
     from functioning.prices import PriceCache
@@ -672,36 +433,75 @@ def track_record(limit: int = 8) -> dict:
     entries = merge_runs(AdviceLog().load(), entries_from_checks(Checks().load(), lambda day: Ledger.cash_before(trades, day)))
     reviews = review_all(entries, PriceCache().load())
     board = sorted(part_scoreboard(reviews), key=lambda part: -ADVICE_WEIGHTS.get(part["name"], 0))
-    return {"reviews": reviews[:limit], "scoreboard": board, "runs": len(reviews)}
+    return {"reviews": reviews[:limit], "scoreboard": board, "runs": len(reviews), "weights": ADVICE_WEIGHTS}
 
 
-@app.route("/apps/three-way/models")
+@app.route("/apps/three-way")
 @login_required
-def three_way_models():
+def three_way():
     user = approved_user()
-    usable = user.is_admin and not IS_PRODUCTION
-    overview = model_overview() if usable else None
-    tested = overview["tested"]["result"]["evaluation"] if overview and overview["tested"] else None
-    today = next(iter(overview["latest"]["result"]["tickers"].values()), None) if overview and overview["latest"] else None
+    if not usable_by(user):
+        return render_template("three_way.html", usable=False, production=IS_PRODUCTION)
+    import_holdings_file(user)  # before the page's parallel requests, which would each try to import it
     three_way_import()
     from functioning.constants import ADVICE_WEIGHTS
-    return render_template("three_way_models.html", is_admin=user.is_admin, production=IS_PRODUCTION, overview=overview,
-                           titles=MODEL_TITLES, weights=ADVICE_WEIGHTS, tested_models=model_names(tested),
-                           today_models=model_names(today), track=track_record() if usable else None,
-                           system_test=latest_ai_run("three_way_system") if usable else None)
+    return render_template("three_way.html", usable=True, defaults=last_scores(), weights=ADVICE_WEIGHTS,
+                           track=track_record())
 
 
-@app.route("/apps/three-way/dashboard/advice")
+@app.route("/apps/three-way/overview")
 @login_required
-def three_way_dashboard_advice():
-    user = approved_user()
-    return {"advice": latest_advice() if user.is_admin and not IS_PRODUCTION else None}
+@limiter.limit("600 per hour", override_defaults=True)
+def three_way_overview():
+    user = three_way_user()
+    from functioning.overview import overview_data
+    try:
+        window = int(read_number(request.args.get("days", "180"), 30, 1825, float))
+    except (ValueError, TypeError):
+        return {"error": "Ongeldige periode."}, 400
+    scores = last_scores()
+    with THREE_WAY_LOCK:
+        return overview_data(window, scores["news"], scores["intuition"], holdings=UserHoldings(user_quantities(user)))
+
+
+@app.route("/apps/three-way/advice")
+@login_required
+def three_way_advice():
+    three_way_user()
+    from functioning.constants import ADVICE_FILE
+    return {"advice": json.loads(ADVICE_FILE.read_text()) if ADVICE_FILE.exists() else None}
+
+
+@app.route("/apps/three-way/advice/run", methods=["POST"])
+@login_required
+@limiter.limit("30 per hour", override_defaults=True)
+def three_way_advice_run():
+    user = three_way_user()
+    from datetime import date
+    from functioning.advice import AdviceError, advice_dict, compute_advice, log_advice, record_advice, save_advice, stocks_in_cash
+    from functioning.storage import RuleStore, Watchlist
+    body = request.get_json(silent=True) or {}
+    try:
+        news = read_number(body.get("news", 0), -5, 5, float)
+        intuition = read_number(body.get("intuition", 0), -5, 5, float)
+    except (ValueError, TypeError):
+        return {"error": "Nieuws en intuïtie moeten tussen -5 en +5 liggen."}, 400
+    day = date.today()
+    try:
+        with THREE_WAY_LOCK:
+            result = compute_advice(user_quantities(user), news, intuition, day, stocks_in_cash(day), Watchlist().load())
+            record_advice(day, result.rows, news, intuition, RuleStore().load()[0])
+            save_advice(result)
+            log_advice(day, result, news, intuition)
+    except AdviceError as error:
+        return {"error": str(error)}, 500
+    return advice_dict(result)
 
 
 @app.route("/apps/three-way/api/holdings", methods=["GET", "POST"])
 @login_required
 def api_holdings():
-    user = approved_user()
+    user = three_way_user()
     if request.method == "GET":
         return {"holdings": [position_json(p) for p in user_positions(user)]}
     try:
@@ -724,7 +524,7 @@ def api_holdings():
 @app.route("/apps/three-way/api/holdings/<ticker>", methods=["DELETE"])
 @login_required
 def api_holdings_delete(ticker):
-    user = approved_user()
+    user = three_way_user()
     position = db.session.scalar(select(Position).where(Position.user_id == user.id, Position.ticker == ticker.upper()))
     if position is None:
         abort(404)
@@ -733,24 +533,23 @@ def api_holdings_delete(ticker):
     return {"deleted": position.ticker}
 
 
-@app.route("/apps/three-way/api/plan", methods=["POST"])
+@app.route("/apps/three-way/api/watchlist", methods=["GET", "POST"])
 @login_required
-def api_plan():
-    """Save the group of each stock and the settings of each group for this user."""
-    user = approved_user()
-    three_way_import()
-    from functioning.groups import plan_from_json
+def api_watchlist():
+    """Aandelen die je interessant vindt. Het advies scoort ze mee en toont de beste als kandidaat."""
+    three_way_user()
+    from functioning.storage import Watchlist
+    if request.method == "GET":
+        return {"watchlist": Watchlist().load()}
+    raw = (request.get_json(silent=True) or {}).get("tickers", "")
     try:
-        plan = plan_from_json(request.get_json(silent=True) or {})
-    except (ValueError, TypeError, AttributeError):
-        return {"error": "Ongeldige instellingen."}, 400
-    for position in user_positions(user):
-        position.group = plan.groups.get(position.ticker)
-    db.session.execute(db.delete(GroupSetting).where(GroupSetting.user_id == user.id))
-    for group, setting in plan.settings.items():
-        db.session.add(GroupSetting(user_id=user.id, group=group, data=json.dumps(setting)))
-    db.session.commit()
-    return {"saved": True}
+        tickers = list(dict.fromkeys(read_ticker(t) for t in re.split(r"[\s,;]+", str(raw)) if t))
+    except ValueError:
+        return {"error": "Een van de tickers is ongeldig. Gebruik Yahoo-tickers, zoals ASML.AS."}, 400
+    if len(tickers) > MAX_WATCHLIST:
+        return {"error": f"Maximaal {MAX_WATCHLIST} aandelen op de watchlist."}, 400
+    Watchlist().save(tickers)
+    return {"watchlist": tickers}
 
 
 @app.route("/apps/three-way/api/players")
@@ -758,21 +557,17 @@ def api_plan():
 @limiter.limit("60 per hour", override_defaults=True)
 def api_players():
     """Ownership, short interest, consensus and insider activity per stock of this user."""
-    user = approved_user()
-    if IS_PRODUCTION:
-        return {"error": "Uitgeschakeld op Render."}, 503
-    three_way_import()
+    user = three_way_user()
     from functioning.players import PlayersCache
-    tickers = [p.ticker for p in user_positions(user)]
     with THREE_WAY_LOCK:
-        return {"players": PlayersCache().rows(tickers)}
+        return {"players": PlayersCache().rows(list(user_quantities(user)))}
 
 
 @app.route("/apps/three-way/api/search")
 @login_required
 @limiter.limit("120 per hour", override_defaults=True)
 def api_search():
-    approved_user()
+    three_way_user()
     query = request.args.get("q", "").strip()
     if len(query) < 2 or len(query) > 40:
         return {"results": []}

@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% block title %}Three Way · kay.apps{% endblock %}
+{% block content %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/three_way.css') }}">
+<div class="subnav"><a href="{{ url_for('dashboard') }}">← Portaal</a></div>
+<p class="eyebrow">FINANCE</p><h1 class="page-title">Three Way</h1>
+{% if not usable %}
+<section class="tool-panel"><p>{{ 'Three Way draait alleen lokaal: start de app op je computer met python app.py.' if production else 'Alleen de beheerder kan Three Way gebruiken.' }}</p></section>
+{% else %}
+<div id="three-way" data-csrf="{{ csrf_token() }}" data-run="{{ url_for('three_way_advice_run') }}" data-advice="{{ url_for('three_way_advice') }}"
+     data-overview="{{ url_for('three_way_overview') }}" data-holdings="{{ url_for('api_holdings') }}" data-watchlist="{{ url_for('api_watchlist') }}"
+     data-search="{{ url_for('api_search') }}" data-players="{{ url_for('api_players') }}">
+
+<section class="tool-panel">
+  <h2>1. Advies voor de komende dagen</h2>
+  <p class="helper">Vul je gevoel over het nieuws en je intuïtie in (-5 slecht, +5 goed) en druk op de knop. De score per aandeel is
+    forest {{ (weights.forest * 100)|round|int }}%, nieuws {{ (weights.nieuws * 100)|round|int }}% en intuïtie {{ (weights.intuitie * 100)|round|int }}%.
+    Belegd en score -1,5 of lager: verkopen. In cash en +1,5 of hoger: terugkopen. Het duurt ongeveer een halve minuut.</p>
+  <form id="advice-form" class="tool-form">
+    <label>Nieuws <input type="number" id="news" min="-5" max="5" step="0.5" value="{{ defaults.news }}" required></label>
+    <label>Intuïtie <input type="number" id="intuition" min="-5" max="5" step="0.5" value="{{ defaults.intuition }}" required></label>
+    <button type="submit" id="run">Bereken advies</button>
+  </form>
+  <p class="helper" id="advice-status">Nog geen advies berekend.</p>
+  <div class="table-wrap" id="actions"></div>
+  <details id="details-box" hidden><summary>Hoe het advies tot stand kwam</summary><p class="helper" id="details-note"></p><div class="table-wrap" id="details"></div></details>
+</section>
+
+<section class="tool-panel">
+  <h2>2. Kandidaten uit je watchlist</h2>
+  <p class="helper">Aandelen die je interessant vindt, met de verwachting van de forest (alleen het model, zonder nieuws en intuïtie). Een score van +1,5 of hoger is een kandidaat om naar te wisselen.</p>
+  <div class="toolbar">
+    <textarea id="watchlist" placeholder="Yahoo-tickers, gescheiden door spatie of komma, bijvoorbeeld ASML.AS NVDA MSFT"></textarea>
+    <button class="secondary-button" id="watchlist-save" type="button">Watchlist opslaan</button>
+  </div>
+  <p class="helper" id="watchlist-status"></p>
+  <div class="table-wrap" id="candidates"></div>
+</section>
+
+<section class="tool-panel">
+  <h2>3. Portefeuille</h2>
+  <div class="toolbar"><label>Periode <select id="window"><option value="90">3 maanden</option><option value="180" selected>6 maanden</option><option value="365">1 jaar</option><option value="730">2 jaar</option></select></label><span class="helper" id="overview-status"></span></div>
+  <div class="tiles" id="tiles"></div>
+  <div class="legend" id="legend"></div>
+  <div class="chart" id="value-chart"></div>
+  <h3>Per aandeel</h3>
+  <div class="table-wrap" id="stocks"></div>
+  <h3>Verkopen en wat ze opleverden</h3>
+  <div class="table-wrap" id="sales"></div>
+</section>
+
+<section class="tool-panel">
+  <h2>4. Mijn aandelen</h2>
+  <p class="helper">Houd dit gelijk aan je beleggingsapp. Zoek op naam of vul de Yahoo-ticker in (bijvoorbeeld NVDA, ASML.AS, MIH.F).</p>
+  <div class="toolbar"><input id="search-q" type="search" placeholder="Zoek op naam of ticker" maxlength="40"><button class="secondary-button" id="search-go" type="button">Zoek</button><span class="helper" id="search-status"></span></div>
+  <div class="results" id="search-results"></div>
+  <div class="toolbar add-row">
+    <label>Ticker <input id="add-ticker" maxlength="15" placeholder="NVDA"></label>
+    <label>Aantal <input id="add-qty" type="number" min="0" step="any"></label>
+    <label>Kosten totaal (EUR) <input id="add-cost" type="number" min="0" step="any" placeholder="optioneel"></label>
+    <button class="primary-button" id="add-go" type="button">Toevoegen</button>
+  </div>
+  <p class="helper" id="holdings-status"></p>
+  <div class="table-wrap" id="holdings"></div>
+</section>
+
+<section class="tool-panel">
+  <h2>5. Waarom nu</h2>
+  <p class="helper">Per aandeel welke factoren vandaag positief, negatief of neutraal zijn.</p>
+  <div class="cards" id="why"></div>
+</section>
+
+<section class="tool-panel">
+  <h2>6. Daghandel</h2>
+  <p class="helper">Volume, gap, dagrange en RSI van de laatste handelsdag.</p>
+  <div class="table-wrap" id="daytrade"></div>
+</section>
+
+<section class="tool-panel">
+  <h2>7. Wie zit erin</h2>
+  <p class="helper" id="players-status"></p>
+  <div class="table-wrap" id="players"></div>
+</section>
+</div>
+
+<section class="tool-panel">
+  <h2>8. Terugblik: hoe goed was het advies?</h2>
+  <p class="helper">Na 3 handelsdagen wordt elk advies beoordeeld. Zit het advies in het aandeel (houden of terugkopen), dan is winst goed. Zit het erbuiten (verkopen of in cash blijven), dan is verlies goed. Spijt is hoeveel beter de beste keuze achteraf was.</p>
+  {% if not track.reviews %}<p class="helper">Nog geen adviezen om te beoordelen. Elk advies komt hier vanzelf bij.</p>{% endif %}
+  {% for review in track.reviews %}
+  <div class="model-card">
+    <h3>Advies van {{ review.day[8:10] }}-{{ review.day[5:7] }}-{{ review.day[0:4] }}
+      <span class="helper">{{ 'afgerond' if review.done else 'lopend, ' ~ review.elapsed ~ ' van ' ~ review.horizon ~ ' dagen' }}</span></h3>
+    {% if review.rows %}
+    <div class="big-number {{ 'pos' if review.mean_result_pct > 0 else 'neg' }}">{{ '%+.1f'|format(review.mean_result_pct) }}%</div>
+    <p class="helper">{{ review.right_calls }} van {{ review.rows|length }} adviezen goed. Achteraf had het {{ '%+.1f'|format(review.mean_result_pct + review.mean_regret_pct) }}% kunnen zijn.</p>
+    <div class="table-wrap"><table class="data"><thead><tr><th>Aandeel</th><th>Advies</th><th>Koers</th><th>Uitkomst</th><th>Spijt</th></tr></thead><tbody>
+      {% for r in review.rows %}
+      <tr><td>{{ r.ticker }}</td><td>{{ {'sell': 'VERKOPEN', 'buy': 'KOPEN', 'hold': 'HOUDEN'}[r.action] }}</td>
+        <td class="{{ 'pos' if r.pct > 0 else 'neg' }}">{{ '%+.1f'|format(r.pct) }}%</td>
+        <td class="{{ 'pos' if r.result_pct > 0 else 'neg' }}">{{ '%+.1f'|format(r.result_pct) }}%</td>
+        <td>{{ '%.1f'|format(r.regret_pct) }}%</td></tr>
+      {% endfor %}
+    </tbody></table></div>
+    {% else %}<p class="helper">Nog geen koersen na deze dag.</p>{% endif %}
+  </div>
+  {% endfor %}
+  {% if track.scoreboard %}
+  <h3>Welk onderdeel had het vaakst gelijk? ({{ track.runs }} adviezen)</h3>
+  <div class="table-wrap"><table class="data"><thead><tr><th>Onderdeel</th><th>Gewicht</th><th>Meningen</th><th>Gelijk</th></tr></thead><tbody>
+    {% for part in track.scoreboard %}
+    <tr><td>{{ part.name }}</td><td>{{ '%.0f'|format(track.weights.get(part.name, 0) * 100) }}%</td><td>{{ part.calls }}</td>
+      <td>{{ '%.0f'|format(part.hit_rate * 100) ~ '%' if part.hit_rate is not none else '-' }}</td></tr>
+    {% endfor %}
+  </tbody></table></div>
+  <p class="helper">Pas na veel adviezen zegt dit iets; een paar is toeval.</p>
+  {% endif %}
+</section>
+<script src="{{ url_for('static', filename='js/three_way.js') }}" defer></script>
+{% endif %}
+{% endblock %}

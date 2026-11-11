@@ -1,6 +1,6 @@
 """Everything the app saves in data/: checks, cash status, snapshots and the chosen rule."""
 
-from functioning.constants import CHECKS_FILE, DAYS_FILE, LEDGER_FILE, RULE_FILE, SNAPSHOT_FILE, STATUS_FILE, TRANSACTION_COST_EUR
+from functioning.constants import CHECKS_FILE, LEDGER_FILE, RULE_FILE, STATUS_FILE, TRANSACTION_COST_EUR, WATCHLIST_FILE
 from functioning.imports import dataclass, date, json
 from functioning.rule import LIVE, Rule
 
@@ -164,96 +164,20 @@ class Ledger:
         return shares * price_now * fx + cash
 
 
-# ----------------------------------------------------------------- days
+# ------------------------------------------------------------ watchlist
 
 
-@dataclass(frozen=True)
-class DayRow:
-    ticker: str
-    price: float                     # last close in the currency of the listing
-    fundamentals: float | None       # analysis part 1, -5..+5
-    forecast: float | None           # analysis part 2, -5..+5
-    action: str                      # the call: "buy", "sell" or "hold"
-    executed: bool                   # was the call carried out (fictively)?
+class Watchlist:
+    """Aandelen die je interessant vindt (Yahoo-tickers). Het advies scoort ze mee als kandidaat om naar te wisselen."""
 
-
-@dataclass(frozen=True)
-class DayRecord:
-    day: date
-    news: float
-    intuition: float
-    rows: list[DayRow]
-
-
-class Days:
-    """Everything of one check day, once per day: the dashboard can rebuild the
-    calls from this with any factor switched on or off."""
-
-    def __init__(self, path=DAYS_FILE):
+    def __init__(self, path=WATCHLIST_FILE):
         self.path = path
 
-    def load(self) -> list[DayRecord]:
-        if not self.path.exists():
-            return []
-        return [
-            DayRecord(
-                date.fromisoformat(d["day"]),
-                d["news"],
-                d["intuition"],
-                [DayRow(**row) for row in d["rows"]],
-            )
-            for d in json.loads(self.path.read_text())
-        ]
+    def load(self) -> list[str]:
+        return json.loads(self.path.read_text()) if self.path.exists() else []
 
-    def save(self, records: list[DayRecord]) -> None:
-        write_json(
-            self.path,
-            [
-                {
-                    "day": r.day.isoformat(),
-                    "news": r.news,
-                    "intuition": r.intuition,
-                    "rows": [vars(row) for row in r.rows],
-                }
-                for r in records
-            ],
-        )
-
-    def add(self, record: DayRecord) -> None:
-        """Add a day. Running twice on the same day replaces that day."""
-        others = [r for r in self.load() if r.day != record.day]
-        self.save(sorted(others + [record], key=lambda r: r.day))
-
-
-# ------------------------------------------------------------ snapshots
-
-
-class Snapshots:
-    """The value in euro per ticker, per day."""
-
-    def __init__(self, path=SNAPSHOT_FILE):
-        self.path = path
-
-    def load(self) -> dict[str, dict[str, float]]:
-        """{day (ISO): {ticker: value in euro}} for every saved day."""
-        if not self.path.exists():
-            return {}
-        return json.loads(self.path.read_text())
-
-    def save(self, day: date, values: dict[str, float]) -> None:
-        """Store the values of one day. Running twice on the same day replaces it."""
-        snapshots = self.load()
-        snapshots[day.isoformat()] = {t: round(v, 2) for t, v in values.items()}
-        write_json(self.path, dict(sorted(snapshots.items())))
-
-    def previous(self, day: date) -> tuple[str, dict[str, float]] | None:
-        """The latest saved day before `day`, with its values."""
-        snapshots = self.load()
-        earlier = [d for d in snapshots if d < day.isoformat()]
-        if not earlier:
-            return None
-        latest = max(earlier)
-        return latest, snapshots[latest]
+    def save(self, tickers: list[str]) -> None:
+        write_json(self.path, tickers)
 
 
 # ----------------------------------------------------------------- rule

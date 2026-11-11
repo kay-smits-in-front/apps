@@ -138,21 +138,3 @@ def test_review_all_lists_the_newest_run_first_and_copes_with_runs_without_parts
     new = {"day": "2026-11-04", "rows": [row("hold", parts=None)]}
     result = review_all([old, new], {"AAA": {"days": DAYS, "closes": [100, 99, 98, 97, 96]}})
     assert [r["day"] for r in result] == ["2026-11-04", "2026-11-02"] and result[0]["rows"][0]["parts"] == []
-
-
-# ------------------------------------------------------------ the text
-
-
-def test_the_report_names_the_status_the_result_the_regret_and_who_was_right():
-    from functioning.review_report import format_run, format_scoreboard
-    parts = {"forest": 2.0, "nieuws": -2.0}
-    entry = {"day": "2026-11-02", "weights": {"forest": 0.25, "nieuws": 0.25}, "rows": [row("hold", parts=parts)]}
-    done = format_run(review_run(entry, prices(100, 97, 95, 90)))
-    assert "afgerond na 3 dagen" in done and "HOUDEN" in done and "-10.0%" in done and "+20.0%" in done
-    assert "Gelijk had" in done and "nieuws" in done and "-100 euro" in done and "Had alleen nieuws beslist" in done
-    running = format_run(review_run(entry, prices(100, 97)))
-    assert "lopend, 1 van 3 dagen" in running
-    assert "Nog geen koersen" in format_run(review_run(entry, prices(100)))
-    assert "Nog geen afgeronde run" in format_scoreboard([], {})
-    board = format_scoreboard([{"name": "nieuws", "calls": 1, "right": 1, "hit_rate": 1.0, "mean_alone_pct": 10.0}], {"nieuws": 0.25})
-    assert "nieuws" in board and "100%" in board and "+10.0%" in board

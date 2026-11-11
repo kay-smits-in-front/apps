@@ -13,7 +13,15 @@ from functioning.constants import (
 )
 from functioning.imports import date, json, timedelta
 from functioning.market import Quote
-from functioning.analysis import to_float as number
+
+
+def number(value) -> float | None:
+    """Alleen echte getallen. Yahoo stuurt soms None of tekst als 'Infinity'."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    if value != value or value in (float("inf"), float("-inf")):
+        return None
+    return float(value)
 
 
 def percent(fraction) -> float | None:

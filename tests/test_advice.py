@@ -9,17 +9,11 @@ import pytest
 THREE_WAY = Path(__file__).resolve().parents[1] / "three-way"
 sys.path.insert(0, str(THREE_WAY))
 
-import advice as script  # noqa: E402
 import functioning.advice as adv  # noqa: E402
-from functioning.advice import log_advice  # noqa: E402
 from functioning.advice_log import AdviceLog, entry_of  # noqa: E402
-from functioning.advice import (
-    build_row, decide, final_score, format_actions, format_table, latest_ai_run, save_advice, stale_note,
-)  # noqa: E402
-from functioning.constants import ACTION_LABELS  # noqa: E402
+from functioning.advice import AdviceResult, advice_dict, build_row, candidates, decide, final_score, save_advice, stale_note  # noqa: E402
 from functioning.prices import Series  # noqa: E402
 from functioning.rule import Action  # noqa: E402
-from functioning.storage import Checks, Ledger  # noqa: E402
 
 TODAY = date(2026, 11, 2)
 
@@ -32,38 +26,35 @@ def flat_series(ticker="AAA", length=300, last=100.0):
 # ------------------------------------------------------------ the score
 
 
-ALL = ("logistisch", "boosted", "gam", "forest", "nieuws", "intuitie")
+ALL = ("forest", "nieuws", "intuitie")
 
 
 def everything(value):
-    """De score van alle vier de modellen uit het AI-lab."""
-    return {"forest": value, "logistisch": value, "boosted": value, "gam": value}
+    """De score van het voorspelmodel."""
+    return {"forest": value}
 
 
 def parts(**given):
     return {name: given.get(name, 0.0) for name in ALL}
 
 
-def test_the_weights_are_three_models_at_10_percent_forest_and_news_25_and_intuition_20():
+def test_the_weights_are_forest_55_news_25_and_intuition_20():
     from functioning.constants import ADVICE_WEIGHTS
-    assert ADVICE_WEIGHTS == {"logistisch": 0.10, "boosted": 0.10, "gam": 0.10, "forest": 0.25, "nieuws": 0.25, "intuitie": 0.20}
-    assert abs(sum(ADVICE_WEIGHTS.values()) - 1) < 1e-9
+    assert ADVICE_WEIGHTS == {"forest": 0.55, "nieuws": 0.25, "intuitie": 0.20}
 
 
 def test_each_part_counts_by_its_weight_in_the_score():
-    for name, weight in {"logistisch": 0.10, "boosted": 0.10, "gam": 0.10, "forest": 0.25, "nieuws": 0.25, "intuitie": 0.20}.items():
+    for name, weight in {"forest": 0.55, "nieuws": 0.25, "intuitie": 0.20}.items():
         score, used = final_score(parts(**{name: 5.0}))
         assert score == pytest.approx(5.0 * weight) and used == list(ALL)
     assert final_score(parts(**{name: 4.0 for name in ALL}))[0] == pytest.approx(4.0)
 
 
 def test_a_missing_part_hands_its_weight_to_the_others_in_proportion():
-    score, used = final_score({"logistisch": None, "boosted": 2.0, "gam": 2.0, "forest": 2.0, "nieuws": 2.0, "intuitie": 2.0})
-    assert score == pytest.approx(2.0) and "logistisch" not in used
-    score, used = final_score({"logistisch": None, "boosted": None, "gam": None, "forest": 0.0, "nieuws": 5.0, "intuitie": 5.0})
-    assert score == pytest.approx((0.25 * 0 + 0.25 * 5 + 0.2 * 5) / 0.7) and used == ["forest", "nieuws", "intuitie"]
+    score, used = final_score({"forest": None, "nieuws": 5.0, "intuitie": 5.0})
+    assert score == pytest.approx(5.0) and used == ["nieuws", "intuitie"]
     score, used = final_score({"lstm": 4.0, "forest": 0.0, "nieuws": -2.0, "intuitie": 2.0})   # een onbekend onderdeel telt niet mee
-    assert score == pytest.approx((0.25 * 0 + 0.25 * -2 + 0.2 * 2) / 0.7) and used == ["forest", "nieuws", "intuitie"]
+    assert score == pytest.approx(0.25 * -2 + 0.2 * 2) and used == list(ALL)
     assert final_score({}) == (0.0, [])
 
 
@@ -111,89 +102,67 @@ def test_old_prices_give_a_warning_and_fresh_ones_do_not():
     assert "BBB" in note and "AAA" not in note and "LET OP" in note
 
 
-# ------------------------------------------------------------- the AI run
+# ------------------------------------------------------------ the forecast
 
 
-def test_latest_ai_run_reads_the_newest_file(tmp_path):
-    assert latest_ai_run(tmp_path) is None
-    (tmp_path / "20261101-000000-three_way_advice.json").write_text(json.dumps({"time": "old"}))
-    (tmp_path / "20261102-000000-three_way_advice.json").write_text(json.dumps({"time": "new"}))
-    (tmp_path / "20261103-000000-other.json").write_text(json.dumps({"time": "other"}))
-    assert latest_ai_run(tmp_path)["time"] == "new"
+def wavy_series(ticker, length=400, seed=1):
+    """Koersen die op en neer gaan, zodat er dalingen, rust en stijgingen zijn om van te leren."""
+    rng = Random(seed)
+    days = [TODAY - timedelta(days=length - 1 - k) for k in range(length)]
+    price, closes = 100.0, []
+    for _ in days:
+        price *= 1 + rng.gauss(0, 0.03)
+        closes.append(price)
+    return Series(ticker, days, closes, 1.0, [1000.0 * (1 + rng.random()) for _ in days])
 
 
-# --------------------------------------------------------------- the list
+def test_the_forecast_scores_every_stock_with_enough_history_between_minus_five_and_five():
+    from functioning.forecast import WARMUP, forecast
+    from functioning.rule import LIVE
+    short = flat_series("NEW", length=WARMUP)
+    found = forecast([wavy_series("AAA"), wavy_series("BBB", seed=2), short], LIVE)
+    assert set(found["scores"]) == {"AAA", "BBB"}
+    assert all(-5 <= v <= 5 for v in found["scores"].values())
+    assert len(found["top"]) == 2 and sum(found["weights"].values()) == pytest.approx(1, abs=1e-3)
 
 
-def test_the_action_list_has_one_line_per_stock():
-    rows = [build_row("AAA", [100.0] * 300, 1000.0, True, everything(-4.0), -3.0, -3.0, ["veel short"]),
-            build_row("BBB", [100.0] * 300, 1000.0, False, None, 0.0, 0.0, [])]
-    text = format_actions(rows, ACTION_LABELS, "komende 2,5 dag")
-    assert "VERKOPEN" in text and "AAA" in text and "HOUDEN" in text and "BBB" in text
-    table = format_table(rows, ACTION_LABELS)
-    assert "veel short" in table and "(2/6 onderdelen)" in table
+def test_the_label_is_fall_nothing_or_rise_of_at_least_the_move_after_the_horizon():
+    from functioning.forecast import direction_after
+    assert direction_after([100, 100, 100, 96], 0) == 0
+    assert direction_after([100, 100, 100, 102], 0) == 1
+    assert direction_after([100, 100, 100, 104], 0) == 2
+    assert direction_after([100, 100, 100], 0) is None
+
+
+def test_watchlist_candidates_leave_out_what_you_hold_and_put_the_best_first():
+    assert candidates({"AAA": 1.0, "BBB": 3.0, "CCC": -2.0}, {"AAA": 5}) == [{"ticker": "BBB", "score": 3.0}, {"ticker": "CCC", "score": -2.0}]
+
+
+def test_compute_advice_scores_holdings_and_watchlist_and_keeps_watchlist_out_of_the_actions(monkeypatch):
+    cache = type("C", (), {"series": lambda self, tickers, day=None: ([wavy_series(t, seed=k) for k, t in enumerate(tickers)], [])})
+    monkeypatch.setattr(adv, "PriceCache", cache)
+    monkeypatch.setattr(adv, "player_labels", lambda tickers, day: {})
+    result = adv.compute_advice({"AAA": 10.0}, 0.0, 0.0, TODAY, set(), ["BBB", "AAA"])
+    assert [r.ticker for r in result.rows] == ["AAA"] and result.rows[0].parts["forest"] is not None
+    assert [c["ticker"] for c in result.candidates] == ["BBB"]
+
+
+def test_without_prices_there_is_no_advice(monkeypatch):
+    monkeypatch.setattr(adv, "PriceCache", type("C", (), {"series": lambda self, tickers, day=None: ([], tickers)}))
+    with pytest.raises(adv.AdviceError):
+        adv.compute_advice({"AAA": 10.0}, 0.0, 0.0, TODAY, set())
+
+
+# --------------------------------------------------------------- the save
 
 
 def test_save_advice_writes_json_for_the_page(tmp_path):
     rows = [build_row("AAA", [100.0] * 300, 1000.0, True, everything(-4.0), -3.0, -3.0, [])]
-    save_advice(TODAY, rows, ["diepte", "trend"], {"diepte": 0.5}, tmp_path / "advice.json")
+    result = AdviceResult(TODAY, rows, ["diepte", "trend"], {"diepte": 0.5}, None, [], [{"ticker": "BBB", "score": 2.0}])
+    save_advice(result, tmp_path / "advice.json")
     saved = json.loads((tmp_path / "advice.json").read_text())
-    assert saved["rows"][0]["action"] == "sell" and saved["top_facets"] == ["diepte", "trend"]
-
-
-# ----------------------------------------------------------- the whole run
-
-
-def prepare_main(tmp_path, monkeypatch, run):
-    holdings = type("H", (), {"quantities": lambda self: {"AAA": 10.0}})
-    cache = type("C", (), {"series": lambda self, tickers, day=None: ([flat_series("AAA")], [])})
-
-    class TmpChecks(Checks):
-        def __init__(self):
-            super().__init__(tmp_path / "checks.json")
-
-    class TmpLedger(Ledger):
-        def __init__(self):
-            super().__init__(tmp_path / "ledger.json")
-
-    monkeypatch.setattr(script, "Holdings", holdings)
-    monkeypatch.setattr(adv, "PriceCache", cache)
-    monkeypatch.setattr(adv, "run_ai_lab", lambda mode="score": (run is not None, "" if run else "No module named 'numpy'"))
-    monkeypatch.setattr(adv, "latest_ai_run", lambda: run)
-    monkeypatch.setattr(adv, "player_labels", lambda tickers, day: {})
-    for module in (script, adv):
-        monkeypatch.setattr(module, "Checks", TmpChecks)
-    monkeypatch.setattr(adv, "Ledger", TmpLedger)
-    monkeypatch.setattr(script, "RuleStore", lambda: type("R", (), {"load": lambda self: (script.Rule(2, 5, 10, 8, 20, 40, 3, 2), None)})())
-    monkeypatch.setattr(script, "save_advice", lambda day, rows, top, weights: save_advice(day, rows, top, weights, tmp_path / "advice.json"))
-    monkeypatch.setattr(script, "log_advice", lambda day, result, news, intuition: log_advice(day, result, news, intuition, AdviceLog(tmp_path / "advice_log.json")))
-    monkeypatch.setattr(script, "date", type("D", (), {"today": staticmethod(lambda: TODAY), "fromisoformat": date.fromisoformat}))
-    answers = iter(["-4", "-4"])
-    monkeypatch.setattr("builtins.input", lambda prompt="": next(answers))
-
-
-def test_main_asks_scores_runs_the_lab_and_prints_the_actions(tmp_path, monkeypatch, capsys):
-    run = {"result": {"top": ["diepte", "trend"], "weights": {"diepte": 1.0},
-                      "tickers": {"AAA": everything(-4.0)}}}
-    prepare_main(tmp_path, monkeypatch, run)
-    script.main()
-    out = capsys.readouterr().out
-    assert "ACTIES" in out and "VERKOPEN" in out and "AAA" in out and "diepte, trend" in out
-    assert [t.action for t in Ledger(tmp_path / "ledger.json").load()] == ["sell"]
-    assert Checks(tmp_path / "checks.json").load()[0].news == -4.0
-    assert json.loads((tmp_path / "advice.json").read_text())["rows"][0]["action"] == "sell"
-    logged = AdviceLog(tmp_path / "advice_log.json").load()
-    assert [e["day"] for e in logged] == [TODAY.isoformat()] and logged[0]["rows"][0]["parts"]["gam"] == -4.0
-
-
-def test_main_gives_no_advice_and_records_nothing_when_the_ai_lab_fails(tmp_path, monkeypatch, capsys):
-    prepare_main(tmp_path, monkeypatch, None)
-    with pytest.raises(SystemExit) as stop:
-        script.main()
-    assert "Geen advies" in str(stop.value) and "requirements.txt" in str(stop.value)
-    assert "ACTIES" not in capsys.readouterr().out
-    assert not (tmp_path / "ledger.json").exists() and not (tmp_path / "advice.json").exists()
-    assert not (tmp_path / "advice_log.json").exists()
+    assert saved == advice_dict(result)
+    assert saved["rows"][0]["action"] == "sell" and saved["top_facets"] == ["diepte", "trend"] and saved["candidates"][0]["ticker"] == "BBB"
 
 
 # ---------------------------------------------------------- the advice log
@@ -209,9 +178,9 @@ def test_the_log_keeps_prices_position_parts_score_weights_and_action_of_every_r
     entry = log.load()[0]
     row = entry["rows"][0]
     assert entry["day"] == TODAY.isoformat() and entry["news"] == -3.0 and entry["top_facets"] == ["diepte", "trend"]
-    assert entry["weights"]["forest"] == 0.25 and sum(entry["weights"].values()) == pytest.approx(1)
+    assert entry["weights"]["forest"] == 0.55 and sum(entry["weights"].values()) == pytest.approx(1)
     assert row["ticker"] == "AAA" and row["price"] == 100.0 and row["position_eur"] == 1000.0 and row["invested"] is True
-    assert set(row["parts"]) == {"forest", "logistisch", "boosted", "gam", "nieuws", "intuitie"}
+    assert set(row["parts"]) == {"forest", "nieuws", "intuitie"}
     assert row["action"] == "sell" and row["score"] < 0
 
 

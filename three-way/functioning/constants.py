@@ -1,57 +1,25 @@
 """All constants. No logic."""
 
-from datetime import date
 from pathlib import Path
-
-# Every score (news, intuition, analysis, context) runs from -SCORE_MAX to +SCORE_MAX
-SCORE_MAX = 5.0
-
-# Context score weights (news, intuition, analysis)
-WEIGHT_NEWS = 0.3
-WEIGHT_INTUITION = 0.3
-WEIGHT_ANALYSIS = 0.3
 
 ACTION_LABELS = {"buy": "KOPEN", "hold": "HOUDEN", "sell": "VERKOPEN"}
 
-# Check days: Monday, Wednesday and Friday (Monday = 0)
-CHECK_WEEKDAYS = {0: "Maandag", 2: "Woensdag", 4: "Vrijdag"}
-
 # Files
-DATA_DIR = Path(__file__).resolve().parent.parent / "data"  # the data folder next to main.py
+DATA_DIR = Path(__file__).resolve().parent.parent / "data"  # the data folder of three-way
 HOLDINGS_FILE = DATA_DIR / "holdings.json"
-SNAPSHOT_FILE = DATA_DIR / "snapshots.json"
 CHECKS_FILE = DATA_DIR / "checks.json"
 STATUS_FILE = DATA_DIR / "status.json"
 LEDGER_FILE = DATA_DIR / "ledger.json"
-DAYS_FILE = DATA_DIR / "days.json"
 PRICES_FILE = DATA_DIR / "prices.json"
 RULE_FILE = DATA_DIR / "rule.json"
-RULE_MAX_AGE_DAYS = 35        # main warns when the saved rule is older than this
 
 # Follow-up of the calls
-PAPER_TRADING = True          # True: main records the calls as done in data/ledger.json. False: main asks j/N per call
-TRACK_START = date(2026, 10, 12)  # backcasting compares hold, executed calls and the maximum from this day
-
-# Backcast table (hold versus perfect foresight), calendar days
-BACKCAST_DAYS = 92
-BACKCAST_TRADING_DAYS = 63    # the same three months in trading days, for the rule backtest
-
-# Analyst forecasts (Yahoo)
-MIN_ANALYSTS = 3              # fewer analysts: no score (pennystocks drop out)
-UPSIDE_FULL_SCORE_PCT = 50.0  # price target this far above the price = score +5
-
-# Fundamentals
-PE_NEUTRAL = 25.0             # P/E of 25 = score 0, 50 = -5, 0 = +5
-GROWTH_FULL_SCORE_PCT = 25.0  # revenue growth of 25% = score +5
-DEBT_NEUTRAL_PCT = 100.0      # debt/equity of 100% = score 0
-DEBT_PCT_PER_POINT = 40.0     # every 40 points more debt = 1 point lower
-
+PAPER_TRADING = True          # True: het advies zet de acties als (fictief) uitgevoerd in data/ledger.json
 # Transaction costs (DEGIRO, 3.95 euro per buy or sell, for every stock)
 TRANSACTION_COST_EUR = 3.95
 COST_COVER_FACTOR = 2.0       # expected move must be this many times the round trip cost
 
-# Start settings of the rule. main uses the setting that `python walkforward.py` saved in
-# data/rule.json, and falls back on these when that file does not exist yet.
+# The rule (one of the facets of the forest). Uses data/rule.json if present, else these settings.
 LIVE_LOOKBACK_DAYS = 2        # trading days a rise or fall is measured over
 LIVE_UP_PCT = 5.0             # sell (take profit) after a rise of this much
 LIVE_DOWN_PCT = 10.0          # buy back (when in cash) after a fall of this much
@@ -65,10 +33,6 @@ LIVE_REVIEW_DAYS = 2          # the rule is checked every 2 trading days
 WINNER_LOOKBACK_DAYS = 250
 WINNER_RETURN_PCT = 100.0
 
-# Decision: the rule gives the signal, these checks can turn it into HOLD
-CONTEXT_VETO = 3.0            # context at or beyond this against the signal = hold
-MIN_TRACK_EXCESS_PP = 0.0     # rule must have beaten buy and hold on this stock (percentage points)
-
 # Rule history
 STRATEGY_HISTORY_DAYS = 1825  # five years of daily prices (shorter if the stock is younger)
 WEEK_DAYS = 5                 # trading days in a week
@@ -78,47 +42,6 @@ LONG_FACTOR = 1.5             # over half a year the trend must be this many tim
 FORTNIGHT_DAYS = 10           # trading days; a rise this fast is a sudden rise
 FAST_SHARE = 0.5              # a fortnight's rise of this share of the extreme limit is sudden
 
-# Settings that walkforward.py tries
-GRID_LOOKBACK_DAYS = (2, 3, 5)
-GRID_UP_PCT = (5.0, 8.0, 10.0)
-GRID_DOWN_PCT = (8.0, 10.0, 15.0, 20.0)
-GRID_STOP_PCT = (5.0, 8.0, 10.0)
-GRID_FLOOR_PCT = (15.0, 20.0, 25.0)
-GRID_REGIME_PCT = (30.0, 40.0, 60.0)
-GRID_TURN_PCT = (3.0, 5.0)
-GRID_REVIEW_DAYS = (2, 3)
-
-# Walk-forward test: pick settings on the train days, test on the days after
-WF_TRAIN_DAYS = 250           # about one year of trading days
-WF_TEST_DAYS = 42             # about two months of trading days
-STABILITY_TOP = 10            # settings shown per group
-RECENCY_HALF_LIFE_WINDOWS = 6  # a period counts half as much for every 6 periods (about a year) it lies back
-
-# Groups of stocks with their own rule. A group is chosen by the look of the price curve.
-GROUP_PEAK = "peak"          # extreme rise, then a long decline: follow the trend
-GROUP_VOLATILE = "volatile"  # large swings in both directions: contrarian with wide limits
-GROUP_CALM = "calm"          # small moves around a flat or positive average: mostly hold
-GROUP_CUMULATIVE = "cumulative"  # compare with the average of the whole history: sell when dear, buy when cheap
-GROUP_VOLUME = "volume"       # follows volume breakouts
-GROUP_LABELS = {GROUP_PEAK: "Piek en daling", GROUP_VOLATILE: "Volatiel", GROUP_CALM: "Rustig",
-                GROUP_CUMULATIVE: "Cumulatief gemiddelde", GROUP_VOLUME: "Volume-uitbraak"}
-DEFAULT_GROUPS = {
-    "MRAM": GROUP_PEAK, "HYLN": GROUP_PEAK, "RDW": GROUP_PEAK,
-    "BRN.AX": GROUP_VOLATILE, "QBTS": GROUP_VOLATILE, "IONQ": GROUP_VOLATILE,
-    "RGTI": GROUP_VOLATILE, "LAES": GROUP_VOLATILE,
-    "ALTO": GROUP_CALM, "ARQQ": GROUP_CALM, "DOCS": GROUP_CALM,
-    "MIH.F": GROUP_CALM, "NVDA": GROUP_CALM, "SPCX": GROUP_CALM,
-}
-# Start settings per group. These are first guesses to tune in the dashboard.
-TREND_MA_DAYS = 20            # rolling average window of the trend rule, trading days
-TREND_BAND_PCT = 3.0          # sell this far under the average, buy back this far above it
-TREND_REVIEW_DAYS = 1
-VOLATILE_SETTINGS = {"lookback_days": 2, "up_pct": 15.0, "down_pct": 12.0, "stop_pct": 10.0,
-                     "floor_pct": 25.0, "regime_pct": 40.0, "turn_pct": 4.0, "review_days": 2}
-CALM_SETTINGS = {"lookback_days": 3, "up_pct": 10.0, "down_pct": 6.0, "stop_pct": 8.0,
-                 "floor_pct": 20.0, "regime_pct": 40.0, "turn_pct": 3.0, "review_days": 2}
-CUMULATIVE_SETTINGS = {"up_pct": 40.0, "down_pct": 25.0, "review_days": 2}  # start guess: sell 40% over, buy back 25% under
-
 # Day-trader view
 DAYTRADE_VOLUME_DAYS = 20     # normal volume = average of this many days before
 DAYTRADE_SPIKE_X = 2.0        # a day with this many times the normal volume is a spike
@@ -126,7 +49,6 @@ DAYTRADE_GAP_PCT = 3.0        # open this far from the previous close is a gap
 DAYTRADE_RANGE_PCT = 8.0      # high minus low of this much of the close is a wide day
 DAYTRADE_ATR_DAYS = 14
 DAYTRADE_RSI_DAYS = 14
-VOLUME_SETTINGS = {"spike_x": 2.0, "min_move_pct": 2.0, "review_days": 1}
 
 # Who is in the stock (Yahoo ownership data)
 PLAYERS_FILE = DATA_DIR / "players.json"
@@ -138,44 +60,26 @@ INSTITUTIONS_HIGH_PCT = 70.0
 CONSENSUS_BUY_MAX = 2.2       # Yahoo recommendation mean: 1 = strong buy ... 5 = strong sell
 CONSENSUS_SELL_MIN = 3.5
 
-# Why now, and timing of the signals
-TIMING_REVERSAL_PCT = 15.0    # a turning point is a peak or trough followed by a reversal of this much
-TIMING_WINDOW_DAYS = 10       # a signal within this many trading days of a turning point is a hit
+# Why now
+TREND_MA_DAYS = 20            # rolling average window of the trend factor, trading days
 WHY_TREND_PCT = 3.0           # close this far from its rolling average is a clear trend
 WHY_CUMULATIVE_PCT = 30.0     # close this far from the average of all closes is dear or cheap
 WHY_RSI_LOW = 30
 WHY_RSI_HIGH = 70
 WHY_SCORE_PCT = 1.0           # news or intuition of this size (-5..+5) counts as a lean
 
-# Rule research (stability of a chosen rule over rolling periods, in the dashboard)
-RESEARCH_WINDOW_DAYS = 42     # trading days per period (about two months)
-RESEARCH_MIN_DAYS = 63        # a stock needs this many days before its first period
-RESEARCH_MAX_WINDOWS = 40
-
-
-# Zoekactie naar de beste regel (search.py)
-SEARCH_LOW_PCT = 0.5          # ondergrens van de procentparameters
-SEARCH_HIGH_PCT = 40.0
-SEARCH_STEP_PCT = 1.0
-SEARCH_PATIENCE = 5           # stop een richting na zoveel opeenvolgende stappen zonder verbetering
-SEARCH_JUMPS = (5.0, 10.0, 20.0, 30.0, 40.0)   # grove sprongen om een ander dal te testen
-SEARCH_FIELDS = ("up_pct", "down_pct", "stop_pct", "floor_pct", "turn_pct")
-SEARCH_MAX_ROUNDS = 6         # keer langs alle velden, stopt eerder als niets meer verbetert
-HOLDOUT_WINDOWS = 6           # laatste perioden (ongeveer een jaar) die de zoekactie niet ziet
-
-# Advies van maandag en woensdag (advice.py): elk onderdeel een score van -5 tot +5, samen gewogen tot 100%
-AI_LAB_DIR = Path(__file__).resolve().parent.parent.parent / "ai-lab"
-AI_EXPERIMENT = "three_way_advice"
+# Advies (advice.py): elk onderdeel een score van -5 tot +5, samen gewogen tot 100%
 ADVICE_FILE = DATA_DIR / "advice.json"
 ADVICE_LOG_FILE = DATA_DIR / "advice_log.json"   # elke run volledig, om achteraf te beoordelen
-ADVICE_WEIGHTS = {            # de drie modellen samen 30%, de forest (beslisbomen over de facetten) en het nieuws elk 25%
-    "logistisch": 0.10,
-    "boosted": 0.10,
-    "gam": 0.10,
-    "forest": 0.25,
+WATCHLIST_FILE = DATA_DIR / "watchlist.json"     # aandelen die je interessant vindt, kandidaten om naar te wisselen
+ADVICE_WEIGHTS = {            # toets nov 2026: de forest alleen deed het beter dan elk mengsel van modellen
+    "forest": 0.55,
     "nieuws": 0.25,
     "intuitie": 0.20,
 }
+FORECAST_HORIZON_DAYS = 3     # twee en een halve dag, naar boven afgerond op handelsdagen
+FORECAST_FULL_SCALE = 0.3     # kans stijging min kans daling van zoveel geeft score +5
+FORECAST_TOP_FACETS = 2       # zoveel facetten toont het advies als zwaarste
 ADVICE_PARTS = tuple(ADVICE_WEIGHTS)
 assert abs(sum(ADVICE_WEIGHTS.values()) - 1.0) < 1e-9, "de gewichten van het advies moeten samen 100% zijn"
 ADVICE_SELL_AT = 1.5          # belegd en de score is dit negatief of lager: verkopen
@@ -183,6 +87,5 @@ ADVICE_BUY_AT = 1.5           # in cash en de score is dit positief of hoger: te
 ADVICE_MOVE_PCT = 3.0         # de beweging waar het AI-advies op mikt, voor de kostencontrole
 ADVICE_HORIZON_TEXT = "komende 2,5 dag"
 ADVICE_MAX_PRICE_AGE_DAYS = 4  # oudere koersen (meer dan een weekend) geven een waarschuwing
-AI_TIMEOUT_SECONDS = 1800  # toetsen en trainen mag tot een half uur duren
 REVIEW_HORIZON_DAYS = 3       # een advies wordt na zoveel handelsdagen beoordeeld
 REVIEW_NEUTRAL = 0.3          # een onderdeel met een score dichter bij 0 dan dit heeft geen mening

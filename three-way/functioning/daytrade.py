@@ -9,9 +9,8 @@ from functioning.constants import (
     DAYTRADE_SPIKE_X,
     DAYTRADE_VOLUME_DAYS,
 )
-from functioning.imports import dataclass, mean
+from functioning.imports import mean
 from functioning.prices import Series
-from functioning.rule import Outcome, Signal
 
 # ------------------------------------------------------------- metrics
 
@@ -62,43 +61,6 @@ def day_change_pct(closes: list[float], index: int) -> float:
 
 
 # ------------------------------------------------------------- the rule
-
-
-@dataclass(frozen=True)
-class VolumeRule:
-    """Follow the volume. A day with `spike_x` times the normal volume and a move of at
-    least `min_move_pct` shows where the big money goes: buy back on an up day, sell on a
-    down day. Same methods as Rule, so the dashboard can use it."""
-
-    spike_x: float
-    min_move_pct: float
-    review_days: int
-    volumes: tuple[float, ...] = ()
-
-    def describe(self) -> str:
-        return f"volume: piek {self.spike_x:.1f}x, beweging {self.min_move_pct:.1f}%, elke {self.review_days} dgn"
-
-    def spike(self, closes: list[float], index: int) -> float:
-        """The signed day move when the day was a volume spike, otherwise 0."""
-        if index >= len(self.volumes):
-            return 0.0
-        rel = relative_volume(list(self.volumes), index)
-        move = day_change_pct(closes, index)
-        return move if rel is not None and rel >= self.spike_x and abs(move) >= self.min_move_pct else 0.0
-
-    def trend_outcome(self, closes: list[float], index: int, invested: bool) -> Outcome:
-        move = self.spike(closes, index)
-        if invested and move < 0:
-            return Outcome(Signal.SELL, "volumepiek op een dalende dag: verkopen")
-        if not invested and move > 0:
-            return Outcome(Signal.BUY, "volumepiek op een stijgende dag: terugkopen")
-        return Outcome(Signal.NONE, "geen volumepiek")
-
-    def trade_move(self, closes: list[float], index: int) -> float:
-        return abs(self.spike(closes, index))
-
-
-# ------------------------------------------------------------- the panel
 
 
 def spike_days(series: Series, first: int) -> list[dict]:
