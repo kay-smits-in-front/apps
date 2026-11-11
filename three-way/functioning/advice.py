@@ -14,9 +14,10 @@ from functioning.constants import (
 )
 from functioning.advice_log import AdviceLog, entry_of
 from functioning.forecast import forecast
-from functioning.imports import dataclass, date
+from functioning.imports import dataclass, date, replace
 from functioning.players import PlayersCache, safely
 from functioning.prices import PriceCache, Series
+from functioning.rotation import rotation_advice
 from functioning.rule import Action, Decision, Rule, is_winner_at, worth_trading
 from functioning.storage import Call, Cash, Check, Checks, Ledger, RuleStore, Trade, write_json
 
@@ -102,6 +103,7 @@ class AdviceResult:
     stale: str | None
     failed: list[str]
     candidates: list[dict]
+    rotation: list[dict]
 
 
 def stocks_in_cash(day: date, ledger: Ledger | None = None) -> set[str]:
@@ -139,11 +141,20 @@ def compute_advice(quantities: dict[str, float], news: float, intuition: float, 
     if not held:
         raise AdviceError("Geen koersen beschikbaar. Controleer je internetverbinding.")
     found = forecast(series, RuleStore().load()[0])
+    rotation = rotation_advice(series, {s.ticker for s in held if s.ticker not in cash})
     ai = {ticker: {"forest": score} for ticker, score in found["scores"].items()}
-    rows = make_rows(held, quantities, cash, ai, news, intuition, player_labels([s.ticker for s in held], day))
+    rows = [with_rotation(row, rotation) for row in
+            make_rows(held, quantities, cash, ai, news, intuition, player_labels([s.ticker for s in held], day))]
     stale = stale_note({s.ticker: s.days[-1] for s in held}, day)
     return AdviceResult(day, rows, found["top"], found["weights"], stale, failed,
-                        candidates(found["scores"], quantities))
+                        candidates(found["scores"], quantities), rotation)
+
+
+def with_rotation(row: AdviceRow, rotation: list[dict]) -> AdviceRow:
+    """De rotatie als extra onderdeel (+5 erin, -5 eruit), alleen voor de terugblik: telt niet mee in de score."""
+    found = next((r for r in rotation if r["ticker"] == row.ticker), None)
+    vote = None if found is None else 5.0 if found["action"] in ("hold", "buy") else -5.0
+    return replace(row, parts=row.parts | {"rotatie": vote})
 
 
 def log_advice(day: date, result: AdviceResult, news: float, intuition: float, log: AdviceLog | None = None) -> None:
@@ -176,7 +187,7 @@ def advice_dict(result: AdviceResult) -> dict:
         "rows": [{"ticker": r.ticker, "invested": r.invested, "parts": r.parts, "score": round(r.score, 2),
                   "action": r.decision.action.value, "reason": r.decision.reason, "labels": r.labels}
                  for r in result.rows],
-        "candidates": result.candidates, "stale": result.stale, "failed": result.failed,
+        "candidates": result.candidates, "rotation": result.rotation, "stale": result.stale, "failed": result.failed,
     }
 
 

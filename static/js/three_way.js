@@ -61,10 +61,12 @@
       html("td", "", score(r.score)), html("td", "", r.reason)]);
     el("actions").replaceChildren(table(["Aandeel", "Actie", "Score", "Reden"], rows));
     say("details-note", `Zwaarste facetten van de forest: ${advice.top_facets.join(", ")}. Alle scores lopen van -5 tot +5.`);
-    el("details").replaceChildren(table(["Aandeel", "Status", "Forest", "Nieuws", "Intuïtie", "Score"], advice.rows.map((r) => [
-      r.ticker, r.invested ? "belegd" : "cash", score(r.parts.forest), score(r.parts.nieuws), score(r.parts.intuitie), score(r.score)])));
+    el("details").replaceChildren(table(["Aandeel", "Status", "Forest", "Nieuws", "Intuïtie", "Score", "Rotatie (telt niet mee)"], advice.rows.map((r) => [
+      r.ticker, r.invested ? "belegd" : "cash", score(r.parts.forest), score(r.parts.nieuws), score(r.parts.intuitie), score(r.score),
+      r.parts.rotatie === undefined || r.parts.rotatie === null ? "-" : r.parts.rotatie > 0 ? "erin" : "eruit"])));
     el("details-box").hidden = false;
     renderCandidates(advice.candidates || []);
+    renderRotation(advice.rotation || []);
     const notes = [`Advies van ${advice.day}.`];
     if (advice.stale) notes.push(advice.stale);
     if (advice.failed && advice.failed.length) notes.push(`Koersen niet ververst voor: ${advice.failed.join(", ")}.`);
@@ -75,6 +77,13 @@
       ? table(["Aandeel", "Verwachting forest", ""], candidates.map((c) => [c.ticker, html("td", c.score >= 1.5 ? "pos" : c.score <= -1.5 ? "neg" : "", score(c.score)),
         c.score >= 1.5 ? "kandidaat" : ""]))
       : html("p", "helper", "Nog geen kandidaten. Vul je watchlist in en bereken het advies."));
+  }
+  const ROTATION = { hold: ["HOUDEN", ""], sell: ["VERKOPEN", "neg"], buy: ["KOPEN", "pos"], none: ["-", ""] };
+  function renderRotation(rows) {
+    el("rotation").replaceChildren(rows.length
+      ? table(["Aandeel", "In bezit", "Rotatie zegt", "Score (stijging / beweeglijkheid)"], rows.map((r) => [
+        r.ticker, r.held ? "ja" : "watchlist", html("td", `action ${ROTATION[r.action][1]}`, ROTATION[r.action][0]), r.score.toFixed(2)]))
+      : html("p", "helper", "Nog geen rotatie. Bereken het advies; aandelen hebben minstens een jaar koershistorie nodig."));
   }
   async function runAdvice(event) {
     event.preventDefault();
@@ -292,7 +301,7 @@
       const o = await api("GET", `${data.overview}?days=${el("window").value}`);
       state.overview = o;
       say("overview-status", o.failed.length ? `Koersen niet ververst voor: ${o.failed.join(", ")}.` : "");
-      if (!o.stocks.length) { say("overview-status", "Nog geen aandelen. Voeg ze toe bij 4. Mijn aandelen."); return; }
+      if (!o.stocks.length) { say("overview-status", "Nog geen aandelen. Voeg ze toe bij 5. Mijn aandelen."); return; }
       renderPortfolio(o); renderDaytrade(o); renderWhy(o);
     } catch (error) {
       say("overview-status", error.message);

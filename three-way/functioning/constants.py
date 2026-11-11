@@ -80,6 +80,9 @@ ADVICE_WEIGHTS = {            # toets nov 2026: de forest alleen deed het beter 
 FORECAST_HORIZON_DAYS = 3     # twee en een halve dag, naar boven afgerond op handelsdagen
 FORECAST_FULL_SCALE = 0.3     # kans stijging min kans daling van zoveel geeft score +5
 FORECAST_TOP_FACETS = 2       # zoveel facetten toont het advies als zwaarste
+ROTATION_LONG_DAYS = 252      # rotatie: stijging over een jaar ...
+ROTATION_SKIP_DAYS = 21       # ... zonder de laatste maand (die keert vaak om)
+ROTATION_VOL_DAYS = 126       # beweeglijkheid over een half jaar
 ADVICE_PARTS = tuple(ADVICE_WEIGHTS)
 assert abs(sum(ADVICE_WEIGHTS.values()) - 1.0) < 1e-9, "de gewichten van het advies moeten samen 100% zijn"
 ADVICE_SELL_AT = 1.5          # belegd en de score is dit negatief of lager: verkopen

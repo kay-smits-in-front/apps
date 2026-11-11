@@ -38,7 +38,16 @@
 </section>
 
 <section class="tool-panel">
-  <h2>3. Portefeuille</h2>
+  <h2>3. Maandelijkse rotatie (ter vergelijking)</h2>
+  <p class="helper">Een tweede manier, naast het advies hierboven. Rangschik je aandelen en je watchlist op de stijging van 12 maanden
+    (zonder de laatste maand) gedeeld door de beweeglijkheid. Houd het beste derde dat stijgt. Voer dit hooguit één keer per maand uit,
+    bij het eerste advies van de maand. In de toets op het verleden was dit beter dan vasthouden, maar niet bewezen. De Terugblik
+    houdt bij of de rotatie (onderdeel "rotatie") vaker gelijk heeft dan de forest, je nieuws en je intuïtie.</p>
+  <div class="table-wrap" id="rotation"></div>
+</section>
+
+<section class="tool-panel">
+  <h2>4. Portefeuille</h2>
   <div class="toolbar"><label>Periode <select id="window"><option value="90">3 maanden</option><option value="180" selected>6 maanden</option><option value="365">1 jaar</option><option value="730">2 jaar</option></select></label><span class="helper" id="overview-status"></span></div>
   <div class="tiles" id="tiles"></div>
   <div class="legend" id="legend"></div>
@@ -50,7 +59,7 @@
 </section>
 
 <section class="tool-panel">
-  <h2>4. Mijn aandelen</h2>
+  <h2>5. Mijn aandelen</h2>
   <p class="helper">Houd dit gelijk aan je beleggingsapp. Zoek op naam of vul de Yahoo-ticker in (bijvoorbeeld NVDA, ASML.AS, MIH.F).</p>
   <div class="toolbar"><input id="search-q" type="search" placeholder="Zoek op naam of ticker" maxlength="40"><button class="secondary-button" id="search-go" type="button">Zoek</button><span class="helper" id="search-status"></span></div>
   <div class="results" id="search-results"></div>
@@ -65,26 +74,26 @@
 </section>
 
 <section class="tool-panel">
-  <h2>5. Waarom nu</h2>
+  <h2>6. Waarom nu</h2>
   <p class="helper">Per aandeel welke factoren vandaag positief, negatief of neutraal zijn.</p>
   <div class="cards" id="why"></div>
 </section>
 
 <section class="tool-panel">
-  <h2>6. Daghandel</h2>
+  <h2>7. Daghandel</h2>
   <p class="helper">Volume, gap, dagrange en RSI van de laatste handelsdag.</p>
   <div class="table-wrap" id="daytrade"></div>
 </section>
 
 <section class="tool-panel">
-  <h2>7. Wie zit erin</h2>
+  <h2>8. Wie zit erin</h2>
   <p class="helper" id="players-status"></p>
   <div class="table-wrap" id="players"></div>
 </section>
 </div>
 
 <section class="tool-panel">
-  <h2>8. Terugblik: hoe goed was het advies?</h2>
+  <h2>9. Terugblik: hoe goed was het advies?</h2>
   <p class="helper">Na 3 handelsdagen wordt elk advies beoordeeld. Zit het advies in het aandeel (houden of terugkopen), dan is winst goed. Zit het erbuiten (verkopen of in cash blijven), dan is verlies goed. Spijt is hoeveel beter de beste keuze achteraf was.</p>
   {% if not track.reviews %}<p class="helper">Nog geen adviezen om te beoordelen. Elk advies komt hier vanzelf bij.</p>{% endif %}
   {% for review in track.reviews %}
@@ -107,13 +116,14 @@
   {% endfor %}
   {% if track.scoreboard %}
   <h3>Welk onderdeel had het vaakst gelijk? ({{ track.runs }} adviezen)</h3>
-  <div class="table-wrap"><table class="data"><thead><tr><th>Onderdeel</th><th>Gewicht</th><th>Meningen</th><th>Gelijk</th></tr></thead><tbody>
+  <div class="table-wrap"><table class="data"><thead><tr><th>Onderdeel</th><th>Gewicht</th><th>Meningen</th><th>Gelijk</th><th>Had dit alleen beslist</th></tr></thead><tbody>
     {% for part in track.scoreboard %}
     <tr><td>{{ part.name }}</td><td>{{ '%.0f'|format(track.weights.get(part.name, 0) * 100) }}%</td><td>{{ part.calls }}</td>
-      <td>{{ '%.0f'|format(part.hit_rate * 100) ~ '%' if part.hit_rate is not none else '-' }}</td></tr>
+      <td>{{ '%.0f'|format(part.hit_rate * 100) ~ '%' if part.hit_rate is not none else '-' }}</td>
+      <td>{{ '%+.1f'|format(part.mean_alone_pct) ~ '%' if part.mean_alone_pct is not none else '-' }}</td></tr>
     {% endfor %}
   </tbody></table></div>
-  <p class="helper">Pas na veel adviezen zegt dit iets; een paar is toeval.</p>
+  <p class="helper">"Had dit alleen beslist" is de gemiddelde uitkomst per aandeel na 3 handelsdagen als alleen dat onderdeel had gekozen tussen erin en eruit. Pas na veel adviezen zegt dit iets; een paar is toeval.</p>
   {% endif %}
 </section>
 <script src="{{ url_for('static', filename='js/three_way.js') }}" defer></script>

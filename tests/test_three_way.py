@@ -212,7 +212,7 @@ def test_portal_card_opens_three_way_and_the_old_pages_are_gone(client):
 def test_the_page_has_the_form_with_the_last_scores_and_every_section(admin):
     page = admin.get("/apps/three-way").data.decode()
     assert "Bereken advies" in page and 'value="1.5"' in page and "three_way.js" in page
-    for title in ("Kandidaten uit je watchlist", "Portefeuille", "Mijn aandelen", "Waarom nu", "Daghandel", "Wie zit erin", "Terugblik"):
+    for title in ("Kandidaten uit je watchlist", "Maandelijkse rotatie", "Portefeuille", "Mijn aandelen", "Waarom nu", "Daghandel", "Wie zit erin", "Terugblik"):
         assert title in page
 
 
@@ -263,7 +263,8 @@ def test_run_button_computes_records_saves_and_returns_the_advice(admin, monkeyp
     import functioning.advice as adv
     calls = {}
     row = adv.build_row("AAA", [100.0] * 300, 1000.0, True, {"forest": -4.0}, -4.0, -4.0, [])
-    result = adv.AdviceResult(TODAY, [row], ["diepte", "trend"], {"diepte": 1.0}, None, [], [{"ticker": "BBB", "score": 2.0}])
+    result = adv.AdviceResult(TODAY, [row], ["diepte", "trend"], {"diepte": 1.0}, None, [], [{"ticker": "BBB", "score": 2.0}],
+                              [{"ticker": "AAA", "score": 1.0, "held": True, "action": "hold"}])
     monkeypatch.setattr(app_module, "verify_ticker", lambda ticker: True)
     monkeypatch.setattr(adv, "compute_advice", lambda quantities, news, intuition, day, cash, watchlist: calls.update(
         quantities=quantities, news=news, watchlist=watchlist) or result)
@@ -276,6 +277,7 @@ def test_run_button_computes_records_saves_and_returns_the_advice(admin, monkeyp
     answer = admin.post("/apps/three-way/advice/run", json={"news": "-4", "intuition": -4}).get_json()
     assert calls == {"quantities": {"AAA": 10.0}, "news": -4.0, "watchlist": ["BBB"], "recorded": 1, "saved": True, "logged": (-4.0, -4.0)}
     assert answer["rows"][0]["action"] == "sell" and answer["candidates"] == [{"ticker": "BBB", "score": 2.0}]
+    assert answer["rotation"][0]["action"] == "hold"
 
 
 def test_run_button_shows_the_reason_when_there_is_no_advice(admin, monkeypatch):

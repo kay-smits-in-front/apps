@@ -145,6 +145,36 @@ def test_compute_advice_scores_holdings_and_watchlist_and_keeps_watchlist_out_of
     result = adv.compute_advice({"AAA": 10.0}, 0.0, 0.0, TODAY, set(), ["BBB", "AAA"])
     assert [r.ticker for r in result.rows] == ["AAA"] and result.rows[0].parts["forest"] is not None
     assert [c["ticker"] for c in result.candidates] == ["BBB"]
+    assert {r["ticker"] for r in result.rotation} == {"AAA", "BBB"} and result.rows[0].parts["rotatie"] in (5.0, -5.0)
+    assert result.rows[0].score == final_score(result.rows[0].parts)[0]    # de rotatie telt niet mee in de score
+
+
+# ------------------------------------------------------------ the rotation
+
+
+def test_rotation_score_is_twelve_minus_one_month_rise_divided_by_volatility():
+    from functioning.rotation import rotation_score
+    assert rotation_score([100.0] * 252) is None                       # te weinig historie
+    assert rotation_score([100.0] * 300) is None                       # geen beweeglijkheid
+    wavy = [100.0 * 1.002 ** k * (1.01 if k % 2 else 0.99) for k in range(300)]
+    assert rotation_score(wavy) > 0 and rotation_score(list(reversed(wavy))) < 0
+
+
+def test_rotation_keeps_the_best_third_that_rises_and_lets_holdings_stay_within_the_buffer():
+    from functioning.rotation import rotation_pick
+    scores = {t: s for t, s in zip("ABCDEFGHI", (9, 8, 7, 6, 5, 4, -1, -2, -3))}
+    assert rotation_pick(scores, set()) == {"A", "B", "C"}
+    assert rotation_pick(scores, {"D", "F"}) == {"D", "A", "B"}       # D in de buffer blijft, F valt eruit
+    assert rotation_pick({"A": -1.0, "B": -2.0, "C": 3.0}, {"A"}) == {"C"}   # alleen wat stijgt
+
+
+def test_rotation_advice_says_hold_sell_buy_or_nothing():
+    from functioning.rotation import rotation_advice
+    series = [wavy_series(t, seed=k) for k, t in enumerate("ABCDEF")]
+    rows = rotation_advice(series, {"A", "B"})
+    assert {r["action"] for r in rows} <= {"hold", "sell", "buy", "none"}
+    assert all(r["held"] == (r["ticker"] in "AB") for r in rows)
+    assert all(r["action"] in ("hold", "sell") for r in rows if r["held"])
 
 
 def test_without_prices_there_is_no_advice(monkeypatch):
@@ -158,7 +188,7 @@ def test_without_prices_there_is_no_advice(monkeypatch):
 
 def test_save_advice_writes_json_for_the_page(tmp_path):
     rows = [build_row("AAA", [100.0] * 300, 1000.0, True, everything(-4.0), -3.0, -3.0, [])]
-    result = AdviceResult(TODAY, rows, ["diepte", "trend"], {"diepte": 0.5}, None, [], [{"ticker": "BBB", "score": 2.0}])
+    result = AdviceResult(TODAY, rows, ["diepte", "trend"], {"diepte": 0.5}, None, [], [{"ticker": "BBB", "score": 2.0}], [])
     save_advice(result, tmp_path / "advice.json")
     saved = json.loads((tmp_path / "advice.json").read_text())
     assert saved == advice_dict(result)
