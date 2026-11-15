@@ -7,9 +7,9 @@ je eigen beeld en een klein voorspelmodel. Alles op één pagina in de app.
 
 1. Start de app vanuit de hoofdmap `apps`: `python app.py`
 2. Open http://127.0.0.1:5000, log in en klik op **Three Way**.
-3. Lees **Vandaag**: daar staat wat je aandacht vraagt. Staat er niets, dan hoef je niets te doen.
-4. Eén keer per week: vul **Nieuws** en **Intuïtie** in (-5 slecht, +5 goed) en druk op **Model en advies bijwerken**.
-5. Wil je iets doen, dan voer je dat zelf uit in je beleggingsapp. Pas daarna onder **Beheer** de aantallen aan.
+3. De pagina laadt alles zelf, ook het model (één keer per dag). Je hoeft niets in te vullen om informatie te zien.
+4. Lees de cijferstrook en **Vandaag**. Staat daar niets, dan hoef je niets te doen.
+5. Doe je iets in je beleggingsapp, leg het dan vast in het **Logboek** en pas onder **Beheer** de aantallen aan.
 
 Eerste keer op een nieuwe computer: `python -m pip install -r requirements.txt` in de hoofdmap.
 Daarna maak je eenmalig een beheerder aan met `flask --app app create-admin`.
@@ -18,11 +18,16 @@ Daarna maak je eenmalig een beheerder aan met `flask --app app create-admin`.
 
 | Onderdeel | Wat het doet |
 |---|---|
+| Cijferstrook | Waarde, verandering over dag, week, maand, 3 maanden en 12 maanden, daling vanaf de top, en het gemiddelde per maand en per kwartaal |
+| Monitor | Eén rij per aandeel (portefeuille en watchlist) met gekleurde cellen per periode, trend, gewicht, model, advies, rotatie en signalen. Klik op een aandeel voor de koersgrafiek met de gemiddelden van 50 en 200 dagen, nieuws, achtergrond en je eigen score met notitie |
 | Vandaag | De punten die aandacht vragen: signalen, een advies om te verkopen of terug te kopen, en in de eerste week van de maand de rotatie |
-| Monitor | Eén rij per aandeel (portefeuille en watchlist): koers, verandering over 1 week, 1 maand, 3 maanden en 12 maanden, trend, gewicht, model, advies, rotatie en signalen. Klik op een aandeel voor nieuws, achtergrond en je eigen score met notitie |
-| Portefeuille | Waarde, daling vanaf de top, en de vergelijking met vasthouden |
-| Beheer | Je aandelen en je watchlist |
+| Regels die werken | Vijf controles op je eigen portefeuille, met de les erbij: grootste positie, grootste drie, trend, daling vanaf de top en het aantal handelingen |
+| Waarde, Rendement per maand, Verdeling | De grafieken van je portefeuille |
+| Logboek | Wat je deed en waarom, met de koers van toen en wat die sindsdien deed |
 | Terugblik | Na 3 handelsdagen: had het advies gelijk, en welk onderdeel? |
+| Beheer | Je aandelen en je watchlist (ingeklapt onderaan) |
+
+Nieuws en intuïtie (rechtsboven, -5 tot +5) zijn je algemene beeld. Na een wijziging druk je op **Bijwerken**.
 
 ## Hoe het werkt
 
@@ -51,7 +56,7 @@ Daarna maak je eenmalig een beheerder aan met `flask --app app create-admin`.
 | `functioning/forecast.py`, `forest.py` | Het model |
 | `functioning/rotation.py` | De maandelijkse rotatie |
 | `functioning/news.py` | Nieuwskoppen van Yahoo |
-| `functioning/overview.py` | De cijfers van de portefeuille |
+| `functioning/overview.py` | De cijfers van de portefeuille, per periode en per maand |
 | `functioning/daytrade.py`, `whynow.py`, `players.py` | Laatste handelsdag, waarom nu, wie zit erin |
 | `functioning/review.py`, `advice_log.py` | De terugblik |
 | `functioning/prices.py`, `market.py` | Koersen van Yahoo, met een cache in `data/prices.json` |

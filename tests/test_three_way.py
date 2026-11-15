@@ -76,10 +76,33 @@ def test_each_stock_has_daytrade_numbers_and_a_why_now_card(data_files):
     assert {"Regel", "Trend", "Nieuws"} <= names and "Intuïtie" not in names
 
 
+def test_portfolio_stats_give_the_periods_the_months_and_the_averages(data_files):
+    stats = overview(data_files)["stats"]
+    assert set(stats["periods"]) == {"d1", "w1", "m1", "m3", "y1"} and stats["from_top_pct"] <= 0
+    assert len(stats["months"]) == 12 and stats["months"][-1]["month"] == "2026-10"
+    assert stats["month_average"] == pytest.approx(sum(m["pct"] for m in stats["months"]) / 12, abs=0.06)
+    assert stats["positive_months"] == sum(m["pct"] > 0 for m in stats["months"]) and stats["best"]["pct"] >= stats["worst"]["pct"]
+
+
+def test_monthly_returns_compare_month_ends_and_quarters_compound_three_months():
+    from functioning.overview import monthly_returns, quarter_average
+    months = monthly_returns(["2026-01-30", "2026-02-10", "2026-02-27", "2026-03-31", "2026-04-30"], [100.0, 90.0, 110.0, 121.0, 121.0])
+    assert months == [{"month": "2026-02", "pct": 10.0}, {"month": "2026-03", "pct": 10.0}, {"month": "2026-04", "pct": 0.0}]
+    assert quarter_average(months) == 21.0 and quarter_average(months[:2]) is None
+
+
+def test_the_monitor_row_carries_a_year_of_chart_with_both_averages(data_files):
+    row = overview(data_files)["monitor"][0]
+    chart = row["chart"]
+    assert len(chart["days"]) == len(chart["closes"]) == len(chart["ma50"]) == len(chart["ma200"]) == 252
+    assert chart["ma200"][-1] is not None and "d1" in row
+
+
 def test_no_stocks_gives_an_empty_overview(data_files):
     cache, _, ledger = data_files
     empty = type("H", (), {"quantities": lambda self: {}})()
-    assert overview_data(180, None, None, cache, empty, ledger, TODAY)["stocks"] == []
+    out = overview_data(180, None, None, cache, empty, ledger, TODAY)
+    assert out["stocks"] == [] and out["stats"] is None
 
 
 def test_stale_cache_without_volumes_is_refetched():
@@ -184,6 +207,7 @@ def admin(client, tmp_path, monkeypatch):
     import functioning.storage as storage
     monkeypatch.setattr(storage.Watchlist.__init__, "__defaults__", (tmp_path / "watchlist.json",))
     monkeypatch.setattr(storage.Views.__init__, "__defaults__", (tmp_path / "views.json",))
+    monkeypatch.setattr(storage.Journal.__init__, "__defaults__", (tmp_path / "journal.json",))
     monkeypatch.setattr(app_module, "track_record", lambda: {"reviews": [], "scoreboard": [], "runs": 0, "weights": {}})
     monkeypatch.setattr(app_module, "last_scores", lambda: {"news": 1.5, "intuition": -1})
     with app_module.app.app_context():
@@ -199,7 +223,7 @@ def test_three_way_needs_login_and_is_closed_to_non_admins(client):
         assert anonymous.get(url).status_code == 302
     assert b"Alleen de beheerder" in client.get("/apps/three-way").data
     for url in ("/apps/three-way/overview", "/apps/three-way/advice", "/apps/three-way/api/holdings", "/apps/three-way/api/watchlist",
-                "/apps/three-way/api/views", "/apps/three-way/api/news/AAA"):
+                "/apps/three-way/api/views", "/apps/three-way/api/news/AAA", "/apps/three-way/api/journal"):
         assert client.get(url).status_code == 403
     assert client.post("/apps/three-way/advice/run", json={}).status_code == 403
 
@@ -213,8 +237,8 @@ def test_portal_card_opens_three_way_and_the_old_pages_are_gone(client):
 
 def test_the_page_has_the_form_with_the_last_scores_and_every_section(admin):
     page = admin.get("/apps/three-way").data.decode()
-    assert "Model en advies bijwerken" in page and 'value="1.5"' in page and "three_way.js" in page
-    for title in ("Vandaag", "Monitor", "Portefeuille", "Mijn aandelen", "Watchlist", "Terugblik"):
+    assert "Bijwerken" in page and 'value="1.5"' in page and "three_way.js" in page
+    for title in ("Vandaag", "Monitor", "Regels die werken", "Rendement per maand", "Verdeling", "Logboek", "Mijn aandelen", "Watchlist", "Terugblik"):
         assert title in page
 
 
@@ -333,3 +357,17 @@ def test_news_route_gives_headlines_and_reports_when_yahoo_fails(admin, monkeypa
     monkeypatch.setattr(news, "headlines", broken)
     assert admin.get("/apps/three-way/api/news/NVDA").status_code == 502
     assert admin.get("/apps/three-way/api/news/bad ticker").status_code == 404
+
+
+def test_journal_keeps_what_you_did_with_the_price_of_that_moment(admin, monkeypatch):
+    monkeypatch.setattr(app_module, "last_price", lambda ticker: 12.5 if ticker == "NVDA" else None)
+    url = "/apps/three-way/api/journal"
+    assert admin.get(url).get_json() == {"journal": []}
+    admin.post(url, json={"ticker": "nvda", "action": "gekocht", "note": " sterke cijfers "})
+    entries = admin.post(url, json={"ticker": "AMD", "action": "niets gedaan", "note": "afwachten"}).get_json()["journal"]
+    assert [(e["ticker"], e["action"], e["note"], e["price"]) for e in entries] == [("AMD", "niets gedaan", "afwachten", None), ("NVDA", "gekocht", "sterke cijfers", 12.5)]
+    assert admin.post(url, json={"ticker": "NVDA", "action": "gekocht", "note": ""}).status_code == 400
+    assert admin.post(url, json={"ticker": "NVDA", "action": "gegokt", "note": "x"}).status_code == 400
+    assert admin.post(url, json={"ticker": "bad ticker", "action": "gekocht", "note": "x"}).status_code == 400
+    left = admin.delete(f"{url}/{entries[0]['id']}").get_json()["journal"]
+    assert [e["ticker"] for e in left] == ["NVDA"]

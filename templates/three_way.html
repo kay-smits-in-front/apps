@@ -3,83 +3,91 @@
 {% block content %}
 <link rel="stylesheet" href="{{ url_for('static', filename='css/three_way.css') }}">
 <div class="tw">
-<div class="subnav"><a href="{{ url_for('dashboard') }}">Terug naar het portaal</a></div>
-<h1 class="page-title">Three Way</h1>
 {% if not usable %}
-<section class="tool-panel"><p>{{ 'Three Way draait alleen lokaal: start de app op je computer met python app.py.' if production else 'Alleen de beheerder kan Three Way gebruiken.' }}</p></section>
+<h1>Three Way</h1>
+<section class="panel"><p>{{ 'Three Way draait alleen lokaal: start de app op je computer met python app.py.' if production else 'Alleen de beheerder kan Three Way gebruiken.' }}</p></section>
 {% else %}
 <div id="three-way" data-csrf="{{ csrf_token() }}" data-run="{{ url_for('three_way_advice_run') }}" data-advice="{{ url_for('three_way_advice') }}"
      data-overview="{{ url_for('three_way_overview') }}" data-holdings="{{ url_for('api_holdings') }}" data-watchlist="{{ url_for('api_watchlist') }}"
      data-search="{{ url_for('api_search') }}" data-players="{{ url_for('api_players') }}" data-views="{{ url_for('api_views') }}"
-     data-news="{{ url_for('api_news', ticker='_') }}">
+     data-news="{{ url_for('api_news', ticker='_') }}" data-journal="{{ url_for('api_journal') }}">
 
-<section class="tool-panel today" aria-labelledby="today-title">
-  <h2 id="today-title">Vandaag</h2>
-  <p class="lead" id="today-lead">Koersen laden ...</p>
-  <ul class="today-list" id="today-list"></ul>
-  <form id="advice-form" class="run-form">
-    <label>Nieuws, algemeen <input type="number" id="news" min="-5" max="5" step="0.5" value="{{ defaults.news }}" required></label>
-    <label>Intuïtie, algemeen <input type="number" id="intuition" min="-5" max="5" step="0.5" value="{{ defaults.intuition }}" required></label>
-    <button type="submit" id="run" class="primary-button">Model en advies bijwerken</button>
+<header class="head">
+  <div>
+    <h1>Three Way</h1>
+    <p class="stamp" id="stamp" role="status">Koersen laden ...</p>
+  </div>
+  <form id="advice-form" class="run-form" aria-label="Jouw algemene beeld">
+    <label>Nieuws <input type="number" id="news" min="-5" max="5" step="0.5" value="{{ defaults.news }}" required></label>
+    <label>Intuïtie <input type="number" id="intuition" min="-5" max="5" step="0.5" value="{{ defaults.intuition }}" required></label>
+    <button type="submit" id="run" class="button">Bijwerken</button>
   </form>
-  <p class="helper">Scores van -5 (slecht) tot +5 (goed). De algemene score geldt voor elk aandeel waar je geen eigen score invulde;
-    een eigen score en notitie geef je per aandeel in de monitor. Bijwerken duurt ongeveer een halve minuut.</p>
-  <p class="helper" id="advice-status" role="status"></p>
-</section>
+</header>
 
-<section class="tool-panel" aria-labelledby="monitor-title">
-  <h2 id="monitor-title">Monitor</h2>
-  <p class="helper">Je aandelen en je watchlist in één tabel: de rollende trends, wat het model denkt en wat opvalt. Klik op een aandeel voor het nieuws, de achtergrond en je eigen beeld.</p>
+<section class="kpis" id="kpis" aria-label="Portefeuille in cijfers"></section>
+
+<div class="grid">
+<section class="panel area-monitor" aria-labelledby="monitor-title">
+  <div class="panel-head"><h2 id="monitor-title">Monitor</h2><span class="hint">Klik op een aandeel voor grafiek, nieuws en je eigen beeld</span></div>
   <div class="table-wrap" id="monitor"></div>
   <details class="legend-box"><summary>Wat betekenen de kolommen?</summary>
     <dl>
-      <dt>1 week tot 12 maanden</dt><dd>De koersverandering over die periode.</dd>
+      <dt>Dag tot 12 maanden</dt><dd>De koersverandering over die periode. Hoe sterker de kleur, hoe groter de beweging.</dd>
       <dt>Trend</dt><dd>Staat de koers boven of onder zijn gemiddelde van 200 dagen.</dd>
       <dt>Gewicht</dt><dd>Welk deel van je portefeuille in dit aandeel zit.</dd>
-      <dt>Morgen hoger</dt><dd>De kans volgens het model dat de slotkoers morgen hoger is. Rond de 50% is gokken. Dit is extra informatie, geen reden om te handelen.</dd>
-      <dt>Advies</dt><dd>De score van -5 tot +5: jouw nieuws {{ (weights.nieuws * 100)|round|int }}%, jouw intuïtie {{ (weights.intuitie * 100)|round|int }}% en het model {{ (weights.forest * 100)|round|int }}%. Belegd en -1,5 of lager: verkopen. In cash en +1,5 of hoger: terugkopen.</dd>
+      <dt>Morgen</dt><dd>De kans volgens het model dat de slotkoers morgen hoger is. Rond de 50% is gokken. Extra informatie, geen reden om te handelen.</dd>
+      <dt>Advies</dt><dd>De score van -5 tot +5: nieuws {{ (weights.nieuws * 100)|round|int }}%, intuïtie {{ (weights.intuitie * 100)|round|int }}%, model {{ (weights.forest * 100)|round|int }}%. Belegd en -1,5 of lager: verkopen. In cash en +1,5 of hoger: terugkopen.</dd>
       <dt>Rotatie</dt><dd>Hoort het aandeel bij het sterkste derde (stijging van 12 maanden gedeeld door beweeglijkheid). Bekijk dit één keer per maand.</dd>
-      <dt>Signalen</dt><dd>Alleen wat deze week veranderde of een grens die je bewaakt: een te grote positie, een val van 20% onder de top van 3 maanden, een kruising van het gemiddelde van 200 dagen, of een volumepiek met een dagbeweging van 3% of meer.</dd>
+      <dt>Signalen</dt><dd>Alleen wat deze week veranderde of een grens die je bewaakt. De tekst staat bij Vandaag.</dd>
+      <dt>Nieuws en intuïtie</dt><dd>Rechtsboven vul je je algemene beeld in, van -5 (slecht) tot +5 (goed). Per aandeel kun je een eigen score en notitie geven.</dd>
     </dl>
   </details>
 </section>
 
-<section class="tool-panel" aria-labelledby="portfolio-title">
-  <h2 id="portfolio-title">Portefeuille</h2>
-  <div class="toolbar"><label>Periode <select id="window"><option value="90">3 maanden</option><option value="180" selected>6 maanden</option><option value="365">1 jaar</option><option value="730">2 jaar</option></select></label><span class="helper" id="overview-status" role="status"></span></div>
-  <div class="tiles" id="tiles"></div>
+<aside class="area-side">
+  <section class="panel" aria-labelledby="today-title">
+    <div class="panel-head"><h2 id="today-title">Vandaag</h2></div>
+    <p class="lead" id="today-lead">Koersen laden ...</p>
+    <ul class="today-list" id="today-list"></ul>
+  </section>
+  <section class="panel" aria-labelledby="rules-title">
+    <div class="panel-head"><h2 id="rules-title">Regels die werken</h2></div>
+    <ul class="rules" id="rules"></ul>
+  </section>
+  <section class="panel" aria-labelledby="alloc-title">
+  <div class="panel-head"><h2 id="alloc-title">Verdeling</h2></div>
+  <div id="allocation"></div>
+</section>
+</aside>
+
+<section class="panel area-value" aria-labelledby="value-title">
+  <div class="panel-head"><h2 id="value-title">Waarde</h2>
+    <label class="inline">Periode <select id="window"><option value="90">3 maanden</option><option value="180" selected>6 maanden</option><option value="365">1 jaar</option><option value="730">2 jaar</option></select></label></div>
   <div class="legend" id="legend"></div>
   <div class="chart" id="value-chart"></div>
-  <h3>Verkopen en wat ze opleverden</h3>
-  <div class="table-wrap" id="sales"></div>
+  <div id="sales"></div>
 </section>
 
-<section class="tool-panel" aria-labelledby="manage-title">
-  <h2 id="manage-title">Beheer</h2>
-  <h3>Mijn aandelen</h3>
-  <p class="helper">Houd dit gelijk aan je beleggingsapp. Zoek op naam of vul de Yahoo-ticker in (bijvoorbeeld NVDA, ASML.AS, MIH.F).</p>
-  <div class="toolbar"><input id="search-q" type="search" placeholder="Zoek op naam of ticker" maxlength="40" aria-label="Zoek een aandeel"><button class="secondary-button" id="search-go" type="button">Zoek</button><span class="helper" id="search-status" role="status"></span></div>
-  <div class="results" id="search-results"></div>
-  <div class="toolbar add-row">
-    <label>Ticker <input id="add-ticker" maxlength="15" placeholder="NVDA"></label>
-    <label>Aantal <input id="add-qty" type="number" min="0" step="any"></label>
-    <label>Kosten totaal (EUR) <input id="add-cost" type="number" min="0" step="any" placeholder="optioneel"></label>
-    <button class="secondary-button" id="add-go" type="button">Toevoegen</button>
-  </div>
-  <p class="helper" id="holdings-status" role="status"></p>
-  <div class="table-wrap" id="holdings"></div>
-  <h3>Watchlist</h3>
-  <p class="helper">Aandelen die je interessant vindt. Ze staan in de monitor en doen mee in de rotatie.</p>
-  <div class="toolbar">
-    <textarea id="watchlist" aria-label="Watchlist" placeholder="Yahoo-tickers, gescheiden door spatie of komma, bijvoorbeeld ASML.AS NVDA MSFT"></textarea>
-    <button class="secondary-button" id="watchlist-save" type="button">Watchlist opslaan</button>
-  </div>
-  <p class="helper" id="watchlist-status" role="status"></p>
+<section class="panel area-months" aria-labelledby="months-title">
+  <div class="panel-head"><h2 id="months-title">Rendement per maand</h2></div>
+  <div class="chart" id="months"></div>
+  <dl class="facts" id="month-facts"></dl>
 </section>
-</div>
 
-<section class="tool-panel">
-  <h2>Terugblik: wie had gelijk?</h2>
+<section class="panel area-journal" aria-labelledby="journal-title">
+  <div class="panel-head"><h2 id="journal-title">Logboek</h2><span class="hint">Schrijf op wat je deed en waarom. Later zie je of het klopte.</span></div>
+  <form id="journal-form" class="journal-form">
+    <label>Aandeel <select id="journal-ticker" required></select></label>
+    <label>Wat <select id="journal-action"><option>gekocht</option><option>verkocht</option><option>niets gedaan</option><option>notitie</option></select></label>
+    <label class="grow">Waarom <input id="journal-note" maxlength="500" required placeholder="Eén zin: wat verwacht je en waarom?"></label>
+    <button type="submit" class="button quiet">Vastleggen</button>
+  </form>
+  <p class="helper" id="journal-status" role="status"></p>
+  <div class="table-wrap" id="journal"></div>
+</section>
+
+<section class="panel area-review" aria-labelledby="review-title">
+  <h2 id="review-title">Terugblik: wie had gelijk?</h2>
   <p class="helper">Na 3 handelsdagen wordt elk advies beoordeeld. Zit het advies in het aandeel (houden of terugkopen), dan is winst goed. Zit het erbuiten (verkopen of in cash blijven), dan is verlies goed. Spijt is hoeveel beter de beste keuze achteraf was.</p>
   {% if not track.reviews %}<p class="helper">Nog geen adviezen om te beoordelen. Elk advies komt hier vanzelf bij.</p>{% endif %}
   {% for review in track.reviews %}
@@ -112,6 +120,33 @@
   <p class="helper">"Had dit alleen beslist" is de gemiddelde uitkomst per aandeel na 3 handelsdagen als alleen dat onderdeel had gekozen tussen erin en eruit. Pas na veel adviezen zegt dit iets; een paar is toeval.</p>
   {% endif %}
 </section>
+
+<section class="panel area-manage" aria-labelledby="manage-title">
+  <details>
+    <summary><h2 id="manage-title">Beheer: mijn aandelen en watchlist</h2></summary>
+    <h3>Mijn aandelen</h3>
+    <p class="helper">Houd dit gelijk aan je beleggingsapp. Zoek op naam of vul de Yahoo-ticker in (bijvoorbeeld NVDA, ASML.AS, MIH.F).</p>
+    <div class="toolbar"><input id="search-q" type="search" placeholder="Zoek op naam of ticker" maxlength="40" aria-label="Zoek een aandeel"><button class="button quiet" id="search-go" type="button">Zoek</button><span class="helper" id="search-status" role="status"></span></div>
+    <div class="results" id="search-results"></div>
+    <div class="toolbar add-row">
+      <label>Ticker <input id="add-ticker" maxlength="15" placeholder="NVDA"></label>
+      <label>Aantal <input id="add-qty" type="number" min="0" step="any"></label>
+      <label>Kosten totaal (EUR) <input id="add-cost" type="number" min="0" step="any" placeholder="optioneel"></label>
+      <button class="button quiet" id="add-go" type="button">Toevoegen</button>
+    </div>
+    <p class="helper" id="holdings-status" role="status"></p>
+    <div class="table-wrap" id="holdings"></div>
+    <h3>Watchlist</h3>
+    <p class="helper">Aandelen die je interessant vindt. Ze staan in de monitor en doen mee in de rotatie.</p>
+    <div class="toolbar">
+      <textarea id="watchlist" aria-label="Watchlist" placeholder="Yahoo-tickers, gescheiden door spatie of komma, bijvoorbeeld ASML.AS NVDA MSFT"></textarea>
+      <button class="button quiet" id="watchlist-save" type="button">Watchlist opslaan</button>
+    </div>
+    <p class="helper" id="watchlist-status" role="status"></p>
+  </details>
+</section>
+</div>
+</div>
 <script src="{{ url_for('static', filename='js/three_way.js') }}" defer></script>
 {% endif %}
 </div>

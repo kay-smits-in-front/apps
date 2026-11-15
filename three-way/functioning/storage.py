@@ -1,6 +1,6 @@
 """Everything the app saves in data/: checks, cash status, snapshots and the chosen rule."""
 
-from functioning.constants import CHECKS_FILE, LEDGER_FILE, RULE_FILE, STATUS_FILE, TRANSACTION_COST_EUR, VIEWS_FILE, WATCHLIST_FILE
+from functioning.constants import CHECKS_FILE, JOURNAL_FILE, LEDGER_FILE, RULE_FILE, STATUS_FILE, TRANSACTION_COST_EUR, VIEWS_FILE, WATCHLIST_FILE
 from functioning.imports import dataclass, date, json
 from functioning.rule import LIVE, Rule
 
@@ -197,6 +197,29 @@ class Views:
             del views[ticker]
         write_json(self.path, views)
         return views
+
+
+class Journal:
+    """Je logboek: per regel de dag, het aandeel, wat je deed, waarom, en de koers van dat moment."""
+
+    def __init__(self, path=JOURNAL_FILE):
+        self.path = path
+
+    def load(self) -> list[dict]:
+        """Alle regels, nieuwste eerst."""
+        return json.loads(self.path.read_text()) if self.path.exists() else []
+
+    def add(self, day: date, ticker: str, action: str, note: str, price: float | None) -> list[dict]:
+        entries = self.load()
+        number = max((e["id"] for e in entries), default=0) + 1
+        entries.insert(0, {"id": number, "day": day.isoformat(), "ticker": ticker, "action": action, "note": note, "price": price})
+        write_json(self.path, entries)
+        return entries
+
+    def remove(self, number: int) -> list[dict]:
+        entries = [e for e in self.load() if e["id"] != number]
+        write_json(self.path, entries)
+        return entries
 
 
 # ----------------------------------------------------------------- rule

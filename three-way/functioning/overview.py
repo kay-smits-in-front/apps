@@ -1,11 +1,11 @@
 """De cijfers achter het overzicht: per aandeel de waarde als je had vastgehouden en met de uitgevoerde adviezen,
 wat elke verkoop opleverde, de daghandelcijfers en waarom nu. Per aandeel en voor de portefeuille, in euro."""
 
-from functioning.constants import TRANSACTION_COST_EUR
+from functioning.constants import STATS_DAYS, STATS_MONTHS, TRANSACTION_COST_EUR
 from functioning.daytrade import daytrade_panel
 from functioning.imports import dataclass, date, timedelta
 from functioning.market import Holdings
-from functioning.monitor import monitor_rows
+from functioning.monitor import PERIODS, change_pct, monitor_rows
 from functioning.prices import PriceCache, Series
 from functioning.storage import Ledger, RuleStore, Trade
 from functioning.whynow import why_now
@@ -139,7 +139,8 @@ def overview_data(window_days: int, news: float | None = None, intuition: float 
     panels = [StockPanel(s, quantities[s.ticker], trades, today, window_days, rule,
                          own_score(views.get(s.ticker), "news", news), own_score(views.get(s.ticker), "intuition", intuition)).build()
               for s in series if s.ticker in quantities]
-    found = {"monitor": monitor_rows(series, quantities), "failed": failed}
+    found = {"monitor": monitor_rows(series, quantities), "failed": failed,
+             "stats": portfolio_stats([s for s in series if s.ticker in quantities], quantities)}
     if not panels:
         return {"days": [], "stocks": [], "total": {line: [] for line in LINES}} | found
     return combine(panels) | found
@@ -149,3 +150,49 @@ def own_score(view: dict | None, key: str, general: float | None) -> float | Non
     """Jouw score voor dit aandeel als je die invulde, anders de algemene score."""
     value = (view or {}).get(key)
     return general if value is None else value
+
+
+# ------------------------------------------------- cijfers van de portefeuille
+
+
+def holding_values(series: list[Series], quantities: dict[str, float]) -> tuple[list[str], list[float]]:
+    """De waarde in euro per dag van wat je nu hebt, over de laatste STATS_DAYS dagen, op één dag-as."""
+    recent = [(s, [d.isoformat() for d in s.days[-STATS_DAYS:]], s.closes[-STATS_DAYS:]) for s in series]
+    axis = sorted({d for _, days, _ in recent for d in days})[-STATS_DAYS:]
+    # shortcut: een aandeel dat later begon telt daarvoor mee tegen zijn eerste koers; apart behandelen als dat stoort
+    lines = [forward_fill(axis, days, [c * quantities[s.ticker] * s.fx for c in closes]) for s, days, closes in recent]
+    return axis, [round(sum(line[i] for line in lines), 2) for i in range(len(axis))]
+
+
+def monthly_returns(axis: list[str], values: list[float]) -> list[dict]:
+    """Rendement in % per kalendermaand: laatste waarde van de maand tegen de laatste van de maand ervoor."""
+    last_of = {day[:7]: value for day, value in zip(axis, values)}
+    months = list(last_of)
+    found = [{"month": m, "pct": round((last_of[m] / last_of[before] - 1) * 100, 1)} for before, m in zip(months, months[1:])]
+    return found[-STATS_MONTHS:]
+
+
+def quarter_average(months: list[dict]) -> float | None:
+    """Gemiddeld rendement per blok van drie maanden (samengesteld), over de volle blokken."""
+    blocks = [months[i:i + 3] for i in range(len(months) % 3, len(months), 3)]
+    results = [((1 + b[0]["pct"] / 100) * (1 + b[1]["pct"] / 100) * (1 + b[2]["pct"] / 100) - 1) * 100 for b in blocks]
+    return round(sum(results) / len(results), 1) if results else None
+
+
+def portfolio_stats(series: list[Series], quantities: dict[str, float]) -> dict | None:
+    """Hoe je huidige portefeuille het deed: per periode, per maand, en gemiddeld per maand en per kwartaal."""
+    if not series:
+        return None
+    axis, values = holding_values(series, quantities)
+    months = monthly_returns(axis, values)
+    pcts = [m["pct"] for m in months]
+    return {
+        "value": values[-1], "day": axis[-1],
+        "periods": {"d1": change_pct(values, 1)} | {name: change_pct(values, days) for name, days in PERIODS.items()},
+        "from_top_pct": round((values[-1] / max(values) - 1) * 100, 1),
+        "months": months,
+        "month_average": round(sum(pcts) / len(pcts), 1) if pcts else None,
+        "quarter_average": quarter_average(months),
+        "positive_months": sum(p > 0 for p in pcts),
+        "best": max(months, key=lambda m: m["pct"], default=None), "worst": min(months, key=lambda m: m["pct"], default=None),
+    }

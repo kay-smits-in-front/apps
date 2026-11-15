@@ -95,6 +95,11 @@ SIGNAL_EVENT_DAYS = 5         # een gebeurtenis telt als hij in de laatste week 
 SIGNAL_MOVE_PCT = 3.0         # een volumepiek telt alleen met een dagbeweging van minstens zoveel
 SPARK_DAYS = 63               # dagen in de minigrafiek
 NEWS_ITEMS = 6                # nieuwskoppen per aandeel
+CHART_DAYS = 252              # dagen in de koersgrafiek per aandeel
+STATS_DAYS = 520              # dagen (ongeveer twee jaar) voor de cijfers van de portefeuille
+STATS_MONTHS = 12             # maanden in het staafdiagram
+JOURNAL_FILE = DATA_DIR / "journal.json"   # je logboek: wat je deed en waarom
+JOURNAL_ACTIONS = ("gekocht", "verkocht", "niets gedaan", "notitie")
 ADVICE_PARTS = tuple(ADVICE_WEIGHTS)
 assert abs(sum(ADVICE_WEIGHTS.values()) - 1.0) < 1e-9, "de gewichten van het advies moeten samen 100% zijn"
 ADVICE_SELL_AT = 1.5          # belegd en de score is dit negatief of lager: verkopen

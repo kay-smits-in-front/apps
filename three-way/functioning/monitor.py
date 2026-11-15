@@ -9,6 +9,7 @@ from functioning.constants import (
     SIGNAL_MOVE_PCT,
     SIGNAL_TREND_DAYS,
     SIGNAL_WEIGHT_PCT,
+    CHART_DAYS,
     SPARK_DAYS,
 )
 from functioning.daytrade import day_change_pct, relative_volume
@@ -78,6 +79,12 @@ def signals(series: Series, weight_pct: float | None) -> list[str]:
     return [text for text in found if text]
 
 
+def rolling_mean(closes: list[float], days: int, count: int) -> list[float | None]:
+    """Het voortschrijdend gemiddelde over `days` dagen voor de laatste `count` dagen. None waar historie ontbreekt."""
+    first = max(0, len(closes) - count)
+    return [round(mean(closes[i - days + 1:i + 1]), 4) if i + 1 >= days else None for i in range(first, len(closes))]
+
+
 def monitor_row(series: Series, value_eur: float | None, total_eur: float) -> dict:
     """Eén regel van de monitor. `value_eur` is None voor een aandeel van de watchlist."""
     closes, last = series.closes, len(series.closes) - 1
@@ -85,7 +92,9 @@ def monitor_row(series: Series, value_eur: float | None, total_eur: float) -> di
     return {
         "ticker": series.ticker, "held": value_eur is not None, "price": round(closes[-1], 2),
         "day": series.days[-1].isoformat(), "value_eur": None if value_eur is None else round(value_eur, 2),
-        "weight_pct": weight, **{name: change_pct(closes, days) for name, days in PERIODS.items()},
+        "weight_pct": weight, "d1": change_pct(closes, 1), **{name: change_pct(closes, days) for name, days in PERIODS.items()},
+        "chart": {"days": [d.isoformat() for d in series.days[-CHART_DAYS:]], "closes": [round(c, 4) for c in closes[-CHART_DAYS:]],
+                  "ma50": rolling_mean(closes, 50, CHART_DAYS), "ma200": rolling_mean(closes, SIGNAL_TREND_DAYS, CHART_DAYS)},
         "from_high_pct": round(from_high_pct(closes, last), 1), "above_average": above_average(closes, last),
         "spark": [round(c, 4) for c in closes[-SPARK_DAYS:]], "signals": signals(series, weight),
     }

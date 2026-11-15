@@ -577,6 +577,42 @@ def api_views():
     return {"views": Views().set(ticker, news, intuition, str(body.get("note") or "").strip()[:500])}
 
 
+def last_price(ticker):
+    """The latest cached close of a ticker, or None when it is not in the price cache."""
+    from functioning.prices import PriceCache
+    entry = PriceCache().load().get(ticker)
+    return entry["closes"][-1] if entry and entry["closes"] else None
+
+
+@app.route("/apps/three-way/api/journal", methods=["GET", "POST"])
+@login_required
+def api_journal():
+    """Het logboek: wat je deed en waarom."""
+    three_way_user()
+    from datetime import date
+    from functioning.constants import JOURNAL_ACTIONS
+    from functioning.storage import Journal
+    if request.method == "GET":
+        return {"journal": Journal().load()}
+    body = request.get_json(silent=True) or {}
+    action, note = body.get("action"), str(body.get("note") or "").strip()[:500]
+    try:
+        ticker = read_ticker(body.get("ticker"))
+    except ValueError:
+        return {"error": "Kies een aandeel."}, 400
+    if action not in JOURNAL_ACTIONS or not note:
+        return {"error": "Kies wat je deed en schrijf in een zin waarom."}, 400
+    return {"journal": Journal().add(date.today(), ticker, action, note, last_price(ticker))}
+
+
+@app.route("/apps/three-way/api/journal/<int:number>", methods=["DELETE"])
+@login_required
+def api_journal_delete(number):
+    three_way_user()
+    from functioning.storage import Journal
+    return {"journal": Journal().remove(number)}
+
+
 @app.route("/apps/three-way/api/news/<ticker>")
 @login_required
 @limiter.limit("300 per hour", override_defaults=True)
