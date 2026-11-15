@@ -72,10 +72,10 @@ WHY_SCORE_PCT = 1.0           # news or intuition of this size (-5..+5) counts a
 ADVICE_FILE = DATA_DIR / "advice.json"
 ADVICE_LOG_FILE = DATA_DIR / "advice_log.json"   # elke run volledig, om achteraf te beoordelen
 WATCHLIST_FILE = DATA_DIR / "watchlist.json"     # aandelen die je interessant vindt, kandidaten om naar te wisselen
-ADVICE_WEIGHTS = {            # toets nov 2026: de forest alleen deed het beter dan elk mengsel van modellen
-    "forest": 0.55,
-    "nieuws": 0.25,
-    "intuitie": 0.20,
+ADVICE_WEIGHTS = {            # jouw eigen beeld weegt het zwaarst; het model speelt een kleine rol (geen bewezen voorsprong)
+    "forest": 0.20,
+    "nieuws": 0.40,
+    "intuitie": 0.40,
 }
 FORECAST_HORIZON_DAYS = 3     # twee en een halve dag, naar boven afgerond op handelsdagen
 FORECAST_FULL_SCALE = 0.3     # kans stijging min kans daling van zoveel geeft score +5
@@ -83,6 +83,18 @@ FORECAST_TOP_FACETS = 2       # zoveel facetten toont het advies als zwaarste
 ROTATION_LONG_DAYS = 252      # rotatie: stijging over een jaar ...
 ROTATION_SKIP_DAYS = 21       # ... zonder de laatste maand (die keert vaak om)
 ROTATION_VOL_DAYS = 126       # beweeglijkheid over een half jaar
+TOMORROW_TREES = 40           # kleiner bos voor de kans op een hogere koers morgen (alleen ter informatie)
+VIEWS_FILE = DATA_DIR / "views.json"   # jouw nieuws, intuïtie en notitie per aandeel
+
+# Monitor: signalen zijn gebeurtenissen van de laatste week, of een grens die je bewaakt
+SIGNAL_WEIGHT_PCT = 20.0      # een positie van zoveel procent van de portefeuille is een klumprisico
+SIGNAL_DROP_PCT = 20.0        # zo ver onder de top van drie maanden
+SIGNAL_HIGH_DAYS = 63         # drie maanden in handelsdagen
+SIGNAL_TREND_DAYS = 200       # het lange gemiddelde
+SIGNAL_EVENT_DAYS = 5         # een gebeurtenis telt als hij in de laatste week viel
+SIGNAL_MOVE_PCT = 3.0         # een volumepiek telt alleen met een dagbeweging van minstens zoveel
+SPARK_DAYS = 63               # dagen in de minigrafiek
+NEWS_ITEMS = 6                # nieuwskoppen per aandeel
 ADVICE_PARTS = tuple(ADVICE_WEIGHTS)
 assert abs(sum(ADVICE_WEIGHTS.values()) - 1.0) < 1e-9, "de gewichten van het advies moeten samen 100% zijn"
 ADVICE_SELL_AT = 1.5          # belegd en de score is dit negatief of lager: verkopen

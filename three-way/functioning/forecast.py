@@ -6,7 +6,7 @@ from collections.abc import Callable
 
 import numpy as np
 
-from functioning.constants import ADVICE_MOVE_PCT, FORECAST_FULL_SCALE, FORECAST_HORIZON_DAYS, FORECAST_TOP_FACETS
+from functioning.constants import ADVICE_MOVE_PCT, FORECAST_FULL_SCALE, FORECAST_HORIZON_DAYS, FORECAST_TOP_FACETS, TOMORROW_TREES
 from functioning.forest import ForestModel
 from functioning.prices import Series
 from functioning.rule import Signal
@@ -82,23 +82,36 @@ def facet_rows(series: Series, found: dict[str, Facet]) -> np.ndarray:
     return np.array(rows, dtype=float).reshape(len(rows), len(found))
 
 
-def direction_after(closes: list[float], i: int) -> int | None:
-    """0 daling, 1 niets, 2 stijging van minstens ADVICE_MOVE_PCT na de horizon. None als de toekomst onbekend is."""
-    if i + FORECAST_HORIZON_DAYS >= len(closes):
+def direction_after(closes: list[float], i: int, horizon: int = FORECAST_HORIZON_DAYS,
+                    move_pct: float = ADVICE_MOVE_PCT) -> int | None:
+    """0 daling, 1 niets, 2 stijging van minstens `move_pct` na `horizon` dagen. None als de toekomst onbekend is."""
+    if i + horizon >= len(closes):
         return None
-    move = closes[i + FORECAST_HORIZON_DAYS] / closes[i] - 1
-    return 0 if move <= -ADVICE_MOVE_PCT / 100 else 2 if move >= ADVICE_MOVE_PCT / 100 else 1
+    move = closes[i + horizon] / closes[i] - 1
+    return 0 if move <= -move_pct / 100 else 2 if move >= move_pct / 100 else 1
 
 
-def training_set(rows: dict[str, np.ndarray], series: list[Series]) -> tuple[np.ndarray, np.ndarray]:
+def training_set(rows: dict[str, np.ndarray], series: list[Series], horizon: int = FORECAST_HORIZON_DAYS,
+                 move_pct: float = ADVICE_MOVE_PCT) -> tuple[np.ndarray, np.ndarray]:
     """Alle dagen met een bekende uitkomst, van alle aandelen samen."""
     features, labels = [], []
     for s in series:
         for k, row in enumerate(rows[s.ticker]):
-            label = direction_after(s.closes, WARMUP + k)
+            label = direction_after(s.closes, WARMUP + k, horizon, move_pct)
             if label is not None:
                 features.append(row), labels.append(label)
     return np.array(features), np.array(labels)
+
+
+def tomorrow_chances(rows: dict[str, np.ndarray], series: list[Series]) -> dict[str, int]:
+    """Kans in % dat de slotkoers van de volgende handelsdag hoger is. Alleen ter informatie: geen handelsreden."""
+    features, labels = training_set(rows, series, 1, 1e-9)   # elke beweging telt: 0 lager, 2 hoger
+    if len(set(labels.tolist())) < 2:
+        return {}
+    model = ForestModel(trees=TOMORROW_TREES)
+    model.fit(features, labels)
+    proba = model.predict_proba(np.array([rows[s.ticker][-1] for s in series]))
+    return {s.ticker: round(float(p[2] / (p[0] + p[2])) * 100) for s, p in zip(series, proba) if p[0] + p[2] > 0}
 
 
 def direction_score(proba: np.ndarray) -> float:
@@ -113,10 +126,11 @@ def forecast(series: list[Series], rule) -> dict:
     rows = {s.ticker: facet_rows(s, found) for s in usable}
     features, labels = training_set(rows, usable)
     if len(set(labels.tolist())) < 2:
-        return {"scores": {}, "weights": {}, "top": []}
+        return {"scores": {}, "weights": {}, "top": [], "tomorrow": {}}
     model = ForestModel()
     model.fit(features, labels)
     names = tuple(found)
     today = model.predict_proba(np.array([rows[s.ticker][-1] for s in usable]))
     return {"scores": {s.ticker: direction_score(p) for s, p in zip(usable, today)},
-            "weights": model.weights(names), "top": model.heaviest(names, FORECAST_TOP_FACETS)}
+            "weights": model.weights(names), "top": model.heaviest(names, FORECAST_TOP_FACETS),
+            "tomorrow": tomorrow_chances(rows, usable)}

@@ -1,6 +1,6 @@
 """Everything the app saves in data/: checks, cash status, snapshots and the chosen rule."""
 
-from functioning.constants import CHECKS_FILE, LEDGER_FILE, RULE_FILE, STATUS_FILE, TRANSACTION_COST_EUR, WATCHLIST_FILE
+from functioning.constants import CHECKS_FILE, LEDGER_FILE, RULE_FILE, STATUS_FILE, TRANSACTION_COST_EUR, VIEWS_FILE, WATCHLIST_FILE
 from functioning.imports import dataclass, date, json
 from functioning.rule import LIVE, Rule
 
@@ -178,6 +178,25 @@ class Watchlist:
 
     def save(self, tickers: list[str]) -> None:
         write_json(self.path, tickers)
+
+
+class Views:
+    """Jouw eigen beeld per aandeel: nieuws en intuïtie (-5 tot +5) en een notitie."""
+
+    def __init__(self, path=VIEWS_FILE):
+        self.path = path
+
+    def load(self) -> dict[str, dict]:
+        return json.loads(self.path.read_text()) if self.path.exists() else {}
+
+    def set(self, ticker: str, news: float | None, intuition: float | None, note: str) -> dict:
+        """Bewaar het beeld van één aandeel. Zonder scores en zonder notitie verdwijnt het."""
+        views = self.load()
+        views[ticker] = {"news": news, "intuition": intuition, "note": note}
+        if news is None and intuition is None and not note:
+            del views[ticker]
+        write_json(self.path, views)
+        return views
 
 
 # ----------------------------------------------------------------- rule

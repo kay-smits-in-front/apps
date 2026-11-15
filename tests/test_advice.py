@@ -38,13 +38,13 @@ def parts(**given):
     return {name: given.get(name, 0.0) for name in ALL}
 
 
-def test_the_weights_are_forest_55_news_25_and_intuition_20():
+def test_the_weights_are_forest_20_news_40_and_intuition_40():
     from functioning.constants import ADVICE_WEIGHTS
-    assert ADVICE_WEIGHTS == {"forest": 0.55, "nieuws": 0.25, "intuitie": 0.20}
+    assert ADVICE_WEIGHTS == {"forest": 0.20, "nieuws": 0.40, "intuitie": 0.40}
 
 
 def test_each_part_counts_by_its_weight_in_the_score():
-    for name, weight in {"forest": 0.55, "nieuws": 0.25, "intuitie": 0.20}.items():
+    for name, weight in {"forest": 0.20, "nieuws": 0.40, "intuitie": 0.40}.items():
         score, used = final_score(parts(**{name: 5.0}))
         assert score == pytest.approx(5.0 * weight) and used == list(ALL)
     assert final_score(parts(**{name: 4.0 for name in ALL}))[0] == pytest.approx(4.0)
@@ -54,7 +54,7 @@ def test_a_missing_part_hands_its_weight_to_the_others_in_proportion():
     score, used = final_score({"forest": None, "nieuws": 5.0, "intuitie": 5.0})
     assert score == pytest.approx(5.0) and used == ["nieuws", "intuitie"]
     score, used = final_score({"lstm": 4.0, "forest": 0.0, "nieuws": -2.0, "intuitie": 2.0})   # een onbekend onderdeel telt niet mee
-    assert score == pytest.approx(0.25 * -2 + 0.2 * 2) and used == list(ALL)
+    assert score == pytest.approx(0.4 * -2 + 0.4 * 2) and used == list(ALL)
     assert final_score({}) == (0.0, [])
 
 
@@ -124,6 +124,7 @@ def test_the_forecast_scores_every_stock_with_enough_history_between_minus_five_
     assert set(found["scores"]) == {"AAA", "BBB"}
     assert all(-5 <= v <= 5 for v in found["scores"].values())
     assert len(found["top"]) == 2 and sum(found["weights"].values()) == pytest.approx(1, abs=1e-3)
+    assert set(found["tomorrow"]) == {"AAA", "BBB"} and all(0 <= v <= 100 for v in found["tomorrow"].values())
 
 
 def test_the_label_is_fall_nothing_or_rise_of_at_least_the_move_after_the_horizon():
@@ -132,6 +133,7 @@ def test_the_label_is_fall_nothing_or_rise_of_at_least_the_move_after_the_horizo
     assert direction_after([100, 100, 100, 102], 0) == 1
     assert direction_after([100, 100, 100, 104], 0) == 2
     assert direction_after([100, 100, 100], 0) is None
+    assert direction_after([100, 100.1], 0, 1, 1e-9) == 2 and direction_after([100, 99.9], 0, 1, 1e-9) == 0   # morgen
 
 
 def test_watchlist_candidates_leave_out_what_you_hold_and_put_the_best_first():
@@ -177,6 +179,16 @@ def test_rotation_advice_says_hold_sell_buy_or_nothing():
     assert all(r["action"] in ("hold", "sell") for r in rows if r["held"])
 
 
+def test_your_own_score_for_a_stock_replaces_the_general_score(monkeypatch):
+    cache = type("C", (), {"series": lambda self, tickers, day=None: ([wavy_series(t, seed=k) for k, t in enumerate(tickers)], [])})
+    monkeypatch.setattr(adv, "PriceCache", cache)
+    monkeypatch.setattr(adv, "player_labels", lambda tickers, day: {})
+    views = {"AAA": {"news": -4.0, "intuition": None, "note": "slechte cijfers"}}
+    rows = {r.ticker: r for r in adv.compute_advice({"AAA": 10.0, "BBB": 10.0}, 1.0, 2.0, TODAY, set(), [], views).rows}
+    assert rows["AAA"].parts["nieuws"] == -4.0 and rows["AAA"].parts["intuitie"] == 2.0
+    assert rows["BBB"].parts["nieuws"] == 1.0 and rows["BBB"].parts["intuitie"] == 2.0
+
+
 def test_without_prices_there_is_no_advice(monkeypatch):
     monkeypatch.setattr(adv, "PriceCache", type("C", (), {"series": lambda self, tickers, day=None: ([], tickers)}))
     with pytest.raises(adv.AdviceError):
@@ -208,7 +220,7 @@ def test_the_log_keeps_prices_position_parts_score_weights_and_action_of_every_r
     entry = log.load()[0]
     row = entry["rows"][0]
     assert entry["day"] == TODAY.isoformat() and entry["news"] == -3.0 and entry["top_facets"] == ["diepte", "trend"]
-    assert entry["weights"]["forest"] == 0.55 and sum(entry["weights"].values()) == pytest.approx(1)
+    assert entry["weights"]["forest"] == 0.20 and sum(entry["weights"].values()) == pytest.approx(1)
     assert row["ticker"] == "AAA" and row["price"] == 100.0 and row["position_eur"] == 1000.0 and row["invested"] is True
     assert set(row["parts"]) == {"forest", "nieuws", "intuitie"}
     assert row["action"] == "sell" and row["score"] < 0
@@ -223,3 +235,66 @@ def test_running_twice_on_one_day_replaces_that_day_and_keeps_the_others_in_orde
     assert days == [(TODAY - timedelta(days=2)).isoformat(), TODAY.isoformat()]
     assert log.load()[1]["news"] == 1.0
     assert AdviceLog(tmp_path / "missing.json").load() == []
+
+
+# ------------------------------------------------------------- the monitor
+
+
+def series_of(closes, volumes=None, ticker="AAA"):
+    days = [TODAY - timedelta(days=len(closes) - 1 - k) for k in range(len(closes))]
+    return Series(ticker, days, closes, 1.0, volumes or [1000.0] * len(closes))
+
+
+def test_monitor_row_has_the_rolling_changes_weight_and_trend():
+    from functioning.monitor import monitor_row
+    closes = [100.0] * 250 + [110.0] * 6
+    row = monitor_row(series_of(closes), 550.0, 1100.0)
+    assert row["w1"] == 0.0 and row["m1"] == 10.0 and row["y1"] == 10.0 and row["weight_pct"] == 50.0
+    assert row["above_average"] is True and row["held"] and len(row["spark"]) == 63
+    watch = monitor_row(series_of([100.0] * 30), None, 1100.0)
+    assert watch["held"] is False and watch["weight_pct"] is None and watch["y1"] is None and watch["above_average"] is None
+
+
+def test_signals_fire_on_this_weeks_events_and_stay_quiet_otherwise():
+    from functioning.monitor import drop_signal, signals, trend_signal, volume_signal, weight_signal
+    quiet = series_of([100.0] * 260)
+    assert signals(quiet, 10.0) == []
+    assert "25%" in weight_signal(25.0) and weight_signal(19.0) is None and weight_signal(None) is None
+    fell = [100.0 + k * 0.01 for k in range(255)] + [78.0] * 3   # licht stijgend, dan een val deze week
+    assert "onder de top" in drop_signal(fell) and "onder het gemiddelde" in trend_signal(fell)
+    assert drop_signal([100.0] * 200 + [78.0] * 20) is None          # al weken laag: geen nieuws meer
+    assert trend_signal([100.0] * 200 + [78.0] * 20) is None
+    spike = series_of([100.0] * 259 + [105.0], [1000.0] * 259 + [3000.0])
+    assert "volume 3.0x" in volume_signal(spike)
+    assert volume_signal(series_of([100.0] * 259 + [100.5], [1000.0] * 259 + [3000.0])) is None   # piek zonder beweging
+
+
+def test_monitor_lists_holdings_first_by_size_then_the_watchlist():
+    from functioning.monitor import monitor_rows
+    series = [series_of([10.0] * 30, ticker="WATCH"), series_of([10.0] * 30, ticker="SMALL"), series_of([10.0] * 30, ticker="BIG")]
+    rows = monitor_rows(series, {"SMALL": 1, "BIG": 9})
+    assert [r["ticker"] for r in rows] == ["BIG", "SMALL", "WATCH"] and rows[0]["weight_pct"] == 90.0
+
+
+# ---------------------------------------------------------- news and views
+
+
+def test_headlines_read_both_yahoo_shapes_and_drop_unsafe_links():
+    from functioning.news import headlines
+    raw = [{"content": {"title": "Nieuw", "pubDate": "2026-11-10T08:00:00Z", "provider": {"displayName": "Reuters"},
+                        "canonicalUrl": {"url": "https://example.com/a"}}},
+           {"title": "Oud", "publisher": "Yahoo", "providerPublishTime": 1700000000, "link": "javascript:alert(1)"},
+           {"content": {"summary": "zonder titel"}}]
+    found = headlines("AAA", lambda ticker: raw)
+    assert [h["title"] for h in found] == ["Nieuw", "Oud"] and found[0]["source"] == "Reuters"
+    assert found[0]["url"] == "https://example.com/a" and found[1]["url"] == "" and found[1]["source"] == "Yahoo"
+    assert headlines("AAA", lambda ticker: None) == []
+
+
+def test_views_are_kept_per_stock_and_an_empty_view_disappears(tmp_path):
+    from functioning.storage import Views
+    views = Views(tmp_path / "views.json")
+    assert views.load() == {}
+    views.set("AAA", -2.0, None, "zwakke cijfers")
+    assert views.load() == {"AAA": {"news": -2.0, "intuition": None, "note": "zwakke cijfers"}}
+    assert views.set("AAA", None, None, "") == {}

@@ -14,7 +14,8 @@ from functioning.constants import (
 )
 from functioning.advice_log import AdviceLog, entry_of
 from functioning.forecast import forecast
-from functioning.imports import dataclass, date, replace
+from functioning.imports import dataclass, date, field, replace
+from functioning.overview import own_score
 from functioning.players import PlayersCache, safely
 from functioning.prices import PriceCache, Series
 from functioning.rotation import rotation_advice
@@ -104,6 +105,7 @@ class AdviceResult:
     failed: list[str]
     candidates: list[dict]
     rotation: list[dict]
+    tomorrow: dict[str, int] = field(default_factory=dict)   # kans in % op een hogere slotkoers morgen
 
 
 def stocks_in_cash(day: date, ledger: Ledger | None = None) -> set[str]:
@@ -118,10 +120,11 @@ def player_labels(tickers: list[str], day: date) -> dict[str, list[str]]:
 
 
 def make_rows(series: list[Series], quantities: dict[str, float], cash: set[str], ai: dict[str, dict],
-              news: float, intuition: float, labels: dict[str, list[str]]) -> list[AdviceRow]:
+              news: float, intuition: float, labels: dict[str, list[str]], views: dict[str, dict]) -> list[AdviceRow]:
     return [
-        build_row(s.ticker, s.closes, quantities[s.ticker] * s.closes[-1] * s.fx, s.ticker not in cash,
-                  ai.get(s.ticker), news, intuition, labels.get(s.ticker, []))
+        build_row(s.ticker, s.closes, quantities[s.ticker] * s.closes[-1] * s.fx, s.ticker not in cash, ai.get(s.ticker),
+                  own_score(views.get(s.ticker), "news", news), own_score(views.get(s.ticker), "intuition", intuition),
+                  labels.get(s.ticker, []))
         for s in series
     ]
 
@@ -133,7 +136,7 @@ def candidates(scores: dict[str, float], held: dict[str, float]) -> list[dict]:
 
 
 def compute_advice(quantities: dict[str, float], news: float, intuition: float, day: date,
-                   cash: set[str], watchlist: list[str] = ()) -> AdviceResult:
+                   cash: set[str], watchlist: list[str] = (), views: dict[str, dict] | None = None) -> AdviceResult:
     """Het hele advies: koersen verversen, de forest leren en scoren, onderdelen wegen, acties en kandidaten."""
     tickers = list(quantities) + [t for t in watchlist if t not in quantities]
     series, failed = PriceCache().series(tickers, day)
@@ -144,10 +147,10 @@ def compute_advice(quantities: dict[str, float], news: float, intuition: float, 
     rotation = rotation_advice(series, {s.ticker for s in held if s.ticker not in cash})
     ai = {ticker: {"forest": score} for ticker, score in found["scores"].items()}
     rows = [with_rotation(row, rotation) for row in
-            make_rows(held, quantities, cash, ai, news, intuition, player_labels([s.ticker for s in held], day))]
+            make_rows(held, quantities, cash, ai, news, intuition, player_labels([s.ticker for s in held], day), views or {})]
     stale = stale_note({s.ticker: s.days[-1] for s in held}, day)
     return AdviceResult(day, rows, found["top"], found["weights"], stale, failed,
-                        candidates(found["scores"], quantities), rotation)
+                        candidates(found["scores"], quantities), rotation, found["tomorrow"])
 
 
 def with_rotation(row: AdviceRow, rotation: list[dict]) -> AdviceRow:
@@ -187,7 +190,7 @@ def advice_dict(result: AdviceResult) -> dict:
         "rows": [{"ticker": r.ticker, "invested": r.invested, "parts": r.parts, "score": round(r.score, 2),
                   "action": r.decision.action.value, "reason": r.decision.reason, "labels": r.labels}
                  for r in result.rows],
-        "candidates": result.candidates, "rotation": result.rotation, "stale": result.stale, "failed": result.failed,
+        "candidates": result.candidates, "rotation": result.rotation, "tomorrow": result.tomorrow, "stale": result.stale, "failed": result.failed,
     }
 
 

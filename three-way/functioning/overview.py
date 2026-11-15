@@ -5,6 +5,7 @@ from functioning.constants import TRANSACTION_COST_EUR
 from functioning.daytrade import daytrade_panel
 from functioning.imports import dataclass, date, timedelta
 from functioning.market import Holdings
+from functioning.monitor import monitor_rows
 from functioning.prices import PriceCache, Series
 from functioning.storage import Ledger, RuleStore, Trade
 from functioning.whynow import why_now
@@ -126,15 +127,25 @@ def combine(panels: list[dict]) -> dict:
 
 def overview_data(window_days: int, news: float | None = None, intuition: float | None = None,
                   cache: PriceCache | None = None, holdings: Holdings | None = None, ledger: Ledger | None = None,
-                  today: date | None = None) -> dict:
-    """Alles wat het overzicht tekent, voor één periode."""
+                  today: date | None = None, watchlist: list[str] = (), views: dict[str, dict] | None = None) -> dict:
+    """Alles wat het overzicht tekent, voor één periode: de monitor (portefeuille en watchlist) en de portefeuille."""
     today = today or date.today()
     quantities = (holdings or Holdings()).quantities()
-    series, failed = (cache or PriceCache()).series(list(quantities), today)
+    tickers = list(quantities) + [t for t in watchlist if t not in quantities]
+    series, failed = (cache or PriceCache()).series(tickers, today)
     trades = (ledger or Ledger()).load()
     rule, _ = RuleStore().load()
-    panels = [StockPanel(s, quantities[s.ticker], trades, today, window_days, rule, news, intuition).build()
-              for s in series]
+    views = views or {}
+    panels = [StockPanel(s, quantities[s.ticker], trades, today, window_days, rule,
+                         own_score(views.get(s.ticker), "news", news), own_score(views.get(s.ticker), "intuition", intuition)).build()
+              for s in series if s.ticker in quantities]
+    found = {"monitor": monitor_rows(series, quantities), "failed": failed}
     if not panels:
-        return {"days": [], "stocks": [], "total": {line: [] for line in LINES}, "failed": failed}
-    return combine(panels) | {"failed": failed}
+        return {"days": [], "stocks": [], "total": {line: [] for line in LINES}} | found
+    return combine(panels) | found
+
+
+def own_score(view: dict | None, key: str, general: float | None) -> float | None:
+    """Jouw score voor dit aandeel als je die invulde, anders de algemene score."""
+    value = (view or {}).get(key)
+    return general if value is None else value

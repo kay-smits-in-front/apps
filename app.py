@@ -459,9 +459,11 @@ def three_way_overview():
         window = int(read_number(request.args.get("days", "180"), 30, 1825, float))
     except (ValueError, TypeError):
         return {"error": "Ongeldige periode."}, 400
+    from functioning.storage import Views, Watchlist
     scores = last_scores()
     with THREE_WAY_LOCK:
-        return overview_data(window, scores["news"], scores["intuition"], holdings=UserHoldings(user_quantities(user)))
+        return overview_data(window, scores["news"], scores["intuition"], holdings=UserHoldings(user_quantities(user)),
+                             watchlist=Watchlist().load(), views=Views().load())
 
 
 @app.route("/apps/three-way/advice")
@@ -479,7 +481,7 @@ def three_way_advice_run():
     user = three_way_user()
     from datetime import date
     from functioning.advice import AdviceError, advice_dict, compute_advice, log_advice, record_advice, save_advice, stocks_in_cash
-    from functioning.storage import RuleStore, Watchlist
+    from functioning.storage import RuleStore, Views, Watchlist
     body = request.get_json(silent=True) or {}
     try:
         news = read_number(body.get("news", 0), -5, 5, float)
@@ -489,7 +491,8 @@ def three_way_advice_run():
     day = date.today()
     try:
         with THREE_WAY_LOCK:
-            result = compute_advice(user_quantities(user), news, intuition, day, stocks_in_cash(day), Watchlist().load())
+            result = compute_advice(user_quantities(user), news, intuition, day, stocks_in_cash(day), Watchlist().load(),
+                                    Views().load())
             record_advice(day, result.rows, news, intuition, RuleStore().load()[0])
             save_advice(result)
             log_advice(day, result, news, intuition)
@@ -552,15 +555,53 @@ def api_watchlist():
     return {"watchlist": tickers}
 
 
+def read_own_score(raw):
+    """A score from -5 to +5, or None when left empty (then the general score counts)."""
+    return None if raw in (None, "") else read_number(raw, -5, 5, float)
+
+
+@app.route("/apps/three-way/api/views", methods=["GET", "POST"])
+@login_required
+def api_views():
+    """Jouw eigen beeld per aandeel: nieuws, intuïtie en een notitie."""
+    three_way_user()
+    from functioning.storage import Views
+    if request.method == "GET":
+        return {"views": Views().load()}
+    body = request.get_json(silent=True) or {}
+    try:
+        ticker = read_ticker(body.get("ticker"))
+        news, intuition = read_own_score(body.get("news")), read_own_score(body.get("intuition"))
+    except (ValueError, TypeError):
+        return {"error": "Scores moeten tussen -5 en +5 liggen."}, 400
+    return {"views": Views().set(ticker, news, intuition, str(body.get("note") or "").strip()[:500])}
+
+
+@app.route("/apps/three-way/api/news/<ticker>")
+@login_required
+@limiter.limit("300 per hour", override_defaults=True)
+def api_news(ticker):
+    three_way_user()
+    from functioning.news import headlines
+    try:
+        return {"news": headlines(read_ticker(ticker))}
+    except ValueError:
+        abort(404)
+    except Exception:
+        app.logger.warning("Yahoo-nieuws mislukt.")
+        return {"error": "Nieuws van Yahoo is nu niet beschikbaar."}, 502
+
+
 @app.route("/apps/three-way/api/players")
 @login_required
 @limiter.limit("60 per hour", override_defaults=True)
 def api_players():
-    """Ownership, short interest, consensus and insider activity per stock of this user."""
+    """Ownership, short interest, consensus and insider activity per stock of this user and the watchlist."""
     user = three_way_user()
     from functioning.players import PlayersCache
+    from functioning.storage import Watchlist
     with THREE_WAY_LOCK:
-        return {"players": PlayersCache().rows(list(user_quantities(user)))}
+        return {"players": PlayersCache().rows(list(dict.fromkeys(list(user_quantities(user)) + Watchlist().load())))}
 
 
 @app.route("/apps/three-way/api/search")

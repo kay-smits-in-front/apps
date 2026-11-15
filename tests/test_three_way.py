@@ -183,6 +183,7 @@ def admin(client, tmp_path, monkeypatch):
         pytest.skip("Three Way is closed in production")
     import functioning.storage as storage
     monkeypatch.setattr(storage.Watchlist.__init__, "__defaults__", (tmp_path / "watchlist.json",))
+    monkeypatch.setattr(storage.Views.__init__, "__defaults__", (tmp_path / "views.json",))
     monkeypatch.setattr(app_module, "track_record", lambda: {"reviews": [], "scoreboard": [], "runs": 0, "weights": {}})
     monkeypatch.setattr(app_module, "last_scores", lambda: {"news": 1.5, "intuition": -1})
     with app_module.app.app_context():
@@ -197,7 +198,8 @@ def test_three_way_needs_login_and_is_closed_to_non_admins(client):
     for url in ("/apps/three-way", "/apps/three-way/overview", "/apps/three-way/advice", "/apps/three-way/api/holdings"):
         assert anonymous.get(url).status_code == 302
     assert b"Alleen de beheerder" in client.get("/apps/three-way").data
-    for url in ("/apps/three-way/overview", "/apps/three-way/advice", "/apps/three-way/api/holdings", "/apps/three-way/api/watchlist"):
+    for url in ("/apps/three-way/overview", "/apps/three-way/advice", "/apps/three-way/api/holdings", "/apps/three-way/api/watchlist",
+                "/apps/three-way/api/views", "/apps/three-way/api/news/AAA"):
         assert client.get(url).status_code == 403
     assert client.post("/apps/three-way/advice/run", json={}).status_code == 403
 
@@ -211,8 +213,8 @@ def test_portal_card_opens_three_way_and_the_old_pages_are_gone(client):
 
 def test_the_page_has_the_form_with_the_last_scores_and_every_section(admin):
     page = admin.get("/apps/three-way").data.decode()
-    assert "Bereken advies" in page and 'value="1.5"' in page and "three_way.js" in page
-    for title in ("Kandidaten uit je watchlist", "Maandelijkse rotatie", "Portefeuille", "Mijn aandelen", "Waarom nu", "Daghandel", "Wie zit erin", "Terugblik"):
+    assert "Model en advies bijwerken" in page and 'value="1.5"' in page and "three_way.js" in page
+    for title in ("Vandaag", "Monitor", "Portefeuille", "Mijn aandelen", "Watchlist", "Terugblik"):
         assert title in page
 
 
@@ -244,13 +246,15 @@ def test_overview_uses_the_users_own_stocks(admin, monkeypatch, data_files):
     monkeypatch.setattr(app_module, "verify_ticker", lambda ticker: True)
     original, seen = module.overview_data, {}
 
-    def spy(window, news, intuition, holdings=None):
+    def spy(window, news, intuition, holdings=None, watchlist=(), views=None):
         seen.update(tickers=sorted(holdings.quantities()), window=window, news=news)
-        return original(window, news, intuition, cache, holdings, ledger, TODAY)
+        return original(window, news, intuition, cache, holdings, ledger, TODAY, watchlist, views)
     monkeypatch.setattr(module, "overview_data", spy)
     admin.post("/apps/three-way/api/holdings", json={"ticker": "AAA", "quantity": 2})
+    admin.post("/apps/three-way/api/watchlist", json={"tickers": "BBB"})
     body = admin.get("/apps/three-way/overview?days=90").get_json()
     assert seen == {"tickers": ["AAA"], "window": 90, "news": 1.5} and body["stocks"][0]["ticker"] == "AAA"
+    assert [(r["ticker"], r["held"]) for r in body["monitor"]] == [("AAA", True), ("BBB", False)]
     assert admin.get("/apps/three-way/overview?days=5").status_code == 400
 
 
@@ -266,16 +270,18 @@ def test_run_button_computes_records_saves_and_returns_the_advice(admin, monkeyp
     result = adv.AdviceResult(TODAY, [row], ["diepte", "trend"], {"diepte": 1.0}, None, [], [{"ticker": "BBB", "score": 2.0}],
                               [{"ticker": "AAA", "score": 1.0, "held": True, "action": "hold"}])
     monkeypatch.setattr(app_module, "verify_ticker", lambda ticker: True)
-    monkeypatch.setattr(adv, "compute_advice", lambda quantities, news, intuition, day, cash, watchlist: calls.update(
-        quantities=quantities, news=news, watchlist=watchlist) or result)
+    monkeypatch.setattr(adv, "compute_advice", lambda quantities, news, intuition, day, cash, watchlist, views: calls.update(
+        quantities=quantities, news=news, watchlist=watchlist, views=views) or result)
     monkeypatch.setattr(adv, "stocks_in_cash", lambda day: set())
     monkeypatch.setattr(adv, "record_advice", lambda day, rows, news, intuition, rule: calls.update(recorded=len(rows)))
     monkeypatch.setattr(adv, "save_advice", lambda r: calls.update(saved=True))
     monkeypatch.setattr(adv, "log_advice", lambda day, r, news, intuition: calls.update(logged=(news, intuition)))
     admin.post("/apps/three-way/api/holdings", json={"ticker": "AAA", "quantity": 10})
     admin.post("/apps/three-way/api/watchlist", json={"tickers": "BBB"})
+    admin.post("/apps/three-way/api/views", json={"ticker": "AAA", "news": -3, "intuition": "", "note": "let op"})
     answer = admin.post("/apps/three-way/advice/run", json={"news": "-4", "intuition": -4}).get_json()
-    assert calls == {"quantities": {"AAA": 10.0}, "news": -4.0, "watchlist": ["BBB"], "recorded": 1, "saved": True, "logged": (-4.0, -4.0)}
+    assert calls == {"quantities": {"AAA": 10.0}, "news": -4.0, "watchlist": ["BBB"], "recorded": 1, "saved": True, "logged": (-4.0, -4.0),
+                     "views": {"AAA": {"news": -3.0, "intuition": None, "note": "let op"}}}
     assert answer["rows"][0]["action"] == "sell" and answer["candidates"] == [{"ticker": "BBB", "score": 2.0}]
     assert answer["rotation"][0]["action"] == "hold"
 
@@ -306,3 +312,24 @@ def test_players_route_returns_rows_for_the_users_stocks(admin, monkeypatch):
     monkeypatch.setattr(players.PlayersCache, "rows", lambda self, tickers, today=None: {t: {"labels": ["x"]} for t in tickers})
     admin.post("/apps/three-way/api/holdings", json={"ticker": "AAA", "quantity": 1})
     assert admin.get("/apps/three-way/api/players").get_json() == {"players": {"AAA": {"labels": ["x"]}}}
+
+
+def test_views_route_saves_a_view_and_rejects_scores_out_of_range(admin):
+    url = "/apps/three-way/api/views"
+    assert admin.post(url, json={"ticker": "nvda", "news": 2, "intuition": "", "note": " sterk kwartaal "}).get_json() == {
+        "views": {"NVDA": {"news": 2.0, "intuition": None, "note": "sterk kwartaal"}}}
+    assert admin.get(url).get_json()["views"]["NVDA"]["news"] == 2.0
+    assert admin.post(url, json={"ticker": "NVDA", "news": 9}).status_code == 400
+    assert admin.post(url, json={"ticker": "bad ticker", "news": 1}).status_code == 400
+
+
+def test_news_route_gives_headlines_and_reports_when_yahoo_fails(admin, monkeypatch):
+    import functioning.news as news
+    monkeypatch.setattr(news, "headlines", lambda ticker: [{"title": "Kop", "source": "Reuters", "time": "", "url": ""}])
+    assert admin.get("/apps/three-way/api/news/nvda").get_json()["news"][0]["title"] == "Kop"
+
+    def broken(ticker):
+        raise RuntimeError("down")
+    monkeypatch.setattr(news, "headlines", broken)
+    assert admin.get("/apps/three-way/api/news/NVDA").status_code == 502
+    assert admin.get("/apps/three-way/api/news/bad ticker").status_code == 404
