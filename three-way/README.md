@@ -1,60 +1,60 @@
 # Three Way
 
-Advies per aandeel voor de komende 2,5 handelsdag, plus het overzicht van je portefeuille. Alles gaat via één pagina
-in de app.
+Een assistent die met je meekijkt: de trends van je aandelen en je watchlist, signalen die aandacht vragen, het nieuws,
+je eigen beeld en een klein voorspelmodel. Alles op één pagina in de app.
 
 ## Gebruik
 
 1. Start de app vanuit de hoofdmap `apps`: `python app.py`
 2. Open http://127.0.0.1:5000, log in en klik op **Three Way**.
-3. Vul **Nieuws** en **Intuïtie** in (-5 slecht, +5 goed) en druk op **Bereken advies** (ongeveer een halve minuut).
-4. Voer de acties (VERKOPEN / KOPEN) zelf uit in je beleggingsapp. Pas daarna bij **Mijn aandelen** de aantallen aan.
-
-Doe dit op maandag en woensdag, of elke dag als je wilt.
+3. Lees **Vandaag**: daar staat wat je aandacht vraagt. Staat er niets, dan hoef je niets te doen.
+4. Eén keer per week: vul **Nieuws** en **Intuïtie** in (-5 slecht, +5 goed) en druk op **Model en advies bijwerken**.
+5. Wil je iets doen, dan voer je dat zelf uit in je beleggingsapp. Pas daarna onder **Beheer** de aantallen aan.
 
 Eerste keer op een nieuwe computer: `python -m pip install -r requirements.txt` in de hoofdmap.
 Daarna maak je eenmalig een beheerder aan met `flask --app app create-admin`.
-De melding "Could not find platform independent libraries" in PyCharm is onschuldig.
 
 ## De pagina
 
 | Onderdeel | Wat het doet |
 |---|---|
-| 1. Advies | Per aandeel de score, de actie en de reden |
-| 2. Kandidaten | Je watchlist (aandelen die je interessant vindt), gescoord door het model. +1,5 of hoger is een kandidaat om naar te wisselen |
-| 3. Portefeuille | Waarde als je had vastgehouden, tegenover de uitgevoerde adviezen; per aandeel en per verkoop |
-| 4. Mijn aandelen | Toevoegen, aanpassen, weghalen (gelijk houden aan je beleggingsapp) |
-| 5. Waarom nu | Welke factoren vandaag positief of negatief zijn |
-| 6. Daghandel | Volume, gap, dagrange en RSI van de laatste dag |
-| 7. Wie zit erin | Institutionelen, insiders, short interest, analisten |
-| 8. Terugblik | Na 3 handelsdagen: had het advies gelijk, en welk onderdeel? |
+| Vandaag | De punten die aandacht vragen: signalen, een advies om te verkopen of terug te kopen, en in de eerste week van de maand de rotatie |
+| Monitor | Eén rij per aandeel (portefeuille en watchlist): koers, verandering over 1 week, 1 maand, 3 maanden en 12 maanden, trend, gewicht, model, advies, rotatie en signalen. Klik op een aandeel voor nieuws, achtergrond en je eigen score met notitie |
+| Portefeuille | Waarde, daling vanaf de top, en de vergelijking met vasthouden |
+| Beheer | Je aandelen en je watchlist |
+| Terugblik | Na 3 handelsdagen: had het advies gelijk, en welk onderdeel? |
 
-## Hoe het advies werkt
+## Hoe het werkt
 
-- **Het model.** Een random forest (`functioning/forecast.py` en `forest.py`, alleen numpy) leert bij elke run opnieuw op
-  de koershistorie van je aandelen en je watchlist. Het kijkt naar zeven facetten: regel, trend, cumulatief, RSI,
-  volume, week en diepte. Het voorspelt of de koers binnen 3 handelsdagen minstens 3% daalt, stijgt of geen van beide.
-- **De score.** Elk onderdeel heeft een score van -5 tot +5. Ze wegen zo mee: forest 55%, nieuws 25%, intuïtie 20%
-  (`ADVICE_WEIGHTS` in `functioning/constants.py`).
-- **De actie.** Ben je belegd en is de score -1,5 of lager, dan verkopen. Zit je in cash en is de score +1,5 of hoger,
-  dan terugkopen. Anders houden.
-- **Uitzonderingen.** Winnaars (verdubbeld in een jaar) worden alleen vastgehouden. Een verkoop die de €3,95 kosten niet
-  dekt, wordt houden.
-
-**Waarom alleen de forest:** in een toets op 5 jaar koersen (november 2026) deed de forest alleen het beter dan een
-logistisch model, boosted bomen, een GAM, een LSTM en elk mengsel daarvan. Geen enkel model versloeg gewoon
-vasthouden. Gebruik je nieuws en intuïtie dus serieus, en kijk in de Terugblik of het advies je helpt.
+- **Signalen** (`functioning/monitor.py`) zijn gebeurtenissen van de laatste week, geen dagelijkse ruis:
+  een positie van 20% of meer van je portefeuille, een val tot 20% onder de top van 3 maanden, een kruising van het
+  gemiddelde van 200 dagen, en een volumepiek (2x normaal) met een dagbeweging van 3% of meer. De grenzen staan in
+  `constants.py` (`SIGNAL_*`).
+- **Jouw beeld.** Nieuws en intuïtie vul je algemeen in, en per aandeel als je daar een eigen mening over hebt
+  (met een notitie). De score per aandeel is nieuws 40%, intuïtie 40% en het model 20% (`ADVICE_WEIGHTS`).
+  Belegd en -1,5 of lager: verkopen. In cash en +1,5 of hoger: terugkopen. Winnaars (verdubbeld in een jaar) worden
+  alleen vastgehouden, en een verkoop die de €3,95 kosten niet dekt, wordt houden.
+- **Het model** (`forecast.py`, `forest.py`) is een random forest op zeven facetten van de koers. Het geeft een score
+  voor de komende 3 dagen en de kans dat de slotkoers morgen hoger is. Dat is extra informatie, geen reden om te
+  handelen: in de toets (november 2026) versloeg geen enkel model, ook geen LSTM, gewoon vasthouden.
+- **De rotatie** (`rotation.py`) rangschikt aandelen op de stijging van 12 maanden zonder de laatste maand, gedeeld
+  door de beweeglijkheid, en houdt het sterkste derde. In de toets beter dan vasthouden, maar niet bewezen.
+  Bekijk hem één keer per maand.
+- **Nieuws** (`news.py`) zijn de laatste koppen van Yahoo per aandeel. Jij beoordeelt wat ze betekenen.
 
 ## Bestanden
 
 | Bestand | Inhoud |
 |---|---|
-| `functioning/advice.py` | Score, actie, kandidaten en opslaan van het advies |
-| `functioning/forecast.py`, `forest.py` | Het voorspelmodel |
+| `functioning/monitor.py` | De rollende trends en de signalen |
+| `functioning/advice.py` | Score, actie en opslaan van het advies |
+| `functioning/forecast.py`, `forest.py` | Het model |
+| `functioning/rotation.py` | De maandelijkse rotatie |
+| `functioning/news.py` | Nieuwskoppen van Yahoo |
 | `functioning/overview.py` | De cijfers van de portefeuille |
-| `functioning/daytrade.py`, `whynow.py`, `players.py` | Daghandel, waarom nu, wie zit erin |
+| `functioning/daytrade.py`, `whynow.py`, `players.py` | Laatste handelsdag, waarom nu, wie zit erin |
 | `functioning/review.py`, `advice_log.py` | De terugblik |
 | `functioning/prices.py`, `market.py` | Koersen van Yahoo, met een cache in `data/prices.json` |
 | `functioning/rule.py`, `storage.py`, `constants.py`, `imports.py` | Regel, opslag, instellingen, imports |
 
-Persoonlijke bestanden in `data/` (holdings, watchlist, logboek) komen niet in Git.
+Persoonlijke bestanden in `data/` (holdings, watchlist, eigen scores, logboek) komen niet in Git.
